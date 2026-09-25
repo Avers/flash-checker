@@ -1,0 +1,26 @@
+build/
+*.o
+*.d
+flashcheck
+flashcheck-tests
+*.elf
+*.bin
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug
+core
+*.core
+
+# CI artifacts
+*.log
+coverage/

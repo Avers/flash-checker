@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build-type: [release, debug, asan]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang-tidy
+
+      - name: Build and test (release)
+        if: matrix.build-type == 'release'
+        run: |
+          make clean
+          make
+          make test
+
+      - name: Build and test (debug)
+        if: matrix.build-type == 'debug'
+        run: |
+          make clean
+          make debug
+          make test
+
+      - name: Build and test (sanitizers)
+        if: matrix.build-type == 'asan'
+        run: |
+          make clean
+          make asan
+
+      - name: Lint
+        run: |
+          make lint || true
+
+      - name: Self-test smoke
+        run: |
+          ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB --yes
+          ./build/flashcheck --self-test=alias --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 1
+          ./build/flashcheck --self-test=stale --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 1

@@ -1,0 +1,150 @@
+# flashcheck
+
+Detect USB flash devices that report more capacity than they really have.
+
+[![Build](https://github.com/flash-checker/flashcheck/workflows/CI/badge.svg)](https://github.com/flash-checker/flash-checker/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+`flashcheck` writes unique, reproducible data directly to a raw block device and verifies it back. It detects controllers that map multiple logical addresses to the same physical storage (aliasing), discard old data when writing past real capacity (stale data), or simply never persist writes beyond their true limit.
+
+## Features
+
+- **Multi-stage testing**: benchmark → sparse probe → retention → full verify
+- **Capacity boundary estimation**: exponential growth + bisection to find reliable capacity
+- **Aliasing detection**: identifies when two LBA addresses return the same data
+- **Color-coded results**: PASS (green), FAIL (red), INCONCLUSIVE (yellow)
+- **Zero dependencies**: C11, Makefile-only build
+- **Fake-device backend**: full test suite runs in CI without hardware
+- **Checkpoint/resume**: interrupted tests can continue
+- **JSON output**: machine-readable reports for automation
+
+## Install
+
+```sh
+make                     # build → build/flashcheck
+sudo make install        # install to /usr/local/bin/flashcheck
+```
+
+## Usage
+
+```sh
+# Identify a device (no writes)
+sudo flashcheck /dev/disk8s1 --identify
+
+# Standard test (destructive, requires --yes to skip confirmation)
+sudo flashcheck /dev/disk8s1 --destructive --yes
+
+# Full test with custom block size
+sudo flashcheck /dev/disk8s1 --destructive --yes --mode full --block-size 16MiB
+
+# Dry run (see the plan, write nothing)
+sudo flashcheck /dev/disk8s1 --destructive --dry-run --yes
+
+# Self-test (no hardware needed)
+flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB
+```
+
+## Modes
+
+| Mode | Description |
+|------|-------------|
+| `identify` | Print device info only, never writes |
+| `quick` | Cheap probe, never certifies capacity |
+| `standard` | Probe + retention + capacity search (default) |
+| `full` | Standard + full write/read verify of all reported capacity |
+
+## Output
+
+```
+RESULT: FAIL
+  7 regions differ, first at 4.00 GiB
+```
+
+| Verdict | Color | Meaning |
+|---------|-------|---------|
+| `PASS` | Green | Device returned every byte written over the tested range |
+| `FAIL` | Red | Evidence of fake capacity (aliasing, stale data, unwritten regions) |
+| `INCONCLUSIVE` | Yellow | Cannot certify — I/O errors, throttling, or need `--mode full` |
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | PASS |
+| 1 | FAIL |
+| 2 | INCONCLUSIVE |
+| 3 | Usage/safety error |
+| 4 | I/O error |
+
+## Building from source
+
+```sh
+make                    # release build
+make debug              # -O0 -g3 with AddressSanitizer + UBSanitizer
+make test               # unit + fake-device detection tests
+make asan               # full test suite under sanitizers
+make lint               # clang-tidy if available, else -Werror build
+make clean              # remove build artifacts
+```
+
+## Safety
+
+- **Requires root** (or `CAP_SYS_RAWIO`) to access raw block devices
+- **Refuses mounted devices** — unmount before testing
+- **Requires `--destructive`** flag — all writes destroy data on the device
+- **File lock** prevents concurrent instances
+- `--dry-run` prints the exact plan and writes nothing
+
+## Project Structure
+
+```
+flashcheck/
+├── Makefile
+├── README.md
+├── LICENSE
+├── docs/
+│   ├── design.md           # investigation & design document
+│   └── IMPLEMENTATION_PLAN.md # phased implementation plan
+├── include/flashcheck/     # public headers
+│   ├── common.h
+│   ├── config.h
+│   ├── device.h
+│   ├── io.h
+│   ├── pattern.h
+│   ├── test.h
+│   ├── util.h
+│   └── ...
+├── src/                    # implementation
+│   ├── main.c
+│   ├── cli.c
+│   ├── safety.c
+│   ├── device/
+│   ├── io/
+│   ├── crypto/
+│   ├── pattern/
+│   ├── test/
+│   ├── scheduler/
+│   ├── stats/
+│   └── report/
+├── tests/                  # unit + integration tests
+└── build/                  # build output (gitignored)
+```
+
+## How It Works
+
+1. **Identify** — read device info (model, serial, capacity, block sizes)
+2. **Benchmark** — measure write/read speeds
+3. **Sparse probe** — write unique patterns at exponentially spaced offsets
+4. **Retention** — write far beyond suspected capacity, then re-verify old regions
+5. **Capacity search** — bisection to find the reliable capacity boundary
+6. **Full verify** — write and verify the entire reported capacity (if `--mode full`)
+
+Each chunk is self-identifying via `seed = SHA256(test_id ‖ pass ‖ chunk_index)`, enabling streaming verification without storing data.
+
+## Contributing
+
+See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the development roadmap.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
