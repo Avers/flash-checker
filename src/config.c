@@ -55,7 +55,7 @@ int config_validate(config *c, char *err, size_t errn)
         snprintf(err, errn, "--passes must be >= 1");
         return -1;
     }
-    if (c->offset % c->chunk_size != 0) {
+    if (c->chunk_size == 0 || c->offset % c->chunk_size != 0) {
         snprintf(err, errn, "--offset must be a multiple of --block-size (%llu)",
                  (unsigned long long)c->chunk_size);
         return -1;
