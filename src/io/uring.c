@@ -26,6 +26,7 @@
 
 #define URING_ENTRIES 32
 #define URING_MAX_RETRY 4
+#define URING_SECTOR 512
 
 struct io_uring_sqe {
     uint8_t opcode;
@@ -119,6 +120,7 @@ struct io_uring_cq {
 typedef struct {
     io_ops ops;
     int fd;
+    int fd_buf;
     int ring_fd;
     void *sq_ring_ptr;
     size_t sq_ring_sz;
@@ -264,12 +266,33 @@ static int uring_retryable(int e)
     return e == -EINTR || e == -EIO || e == -ETIMEDOUT || e == -EBUSY;
 }
 
+static int uring_can_direct(const io_uring *u, uint64_t off, size_t len)
+{
+    if (!u->ops.stats->direct_active || u->fd_buf < 0)
+        return 0;
+    if (off % URING_SECTOR != 0 || len % URING_SECTOR != 0)
+        return 0;
+    if (u->ops.stats->capacity != 0 && off + len > u->ops.stats->capacity)
+        return 0;
+    return 1;
+}
+
+static int uring_fd_for(const io_uring *u, uint64_t off, size_t len)
+{
+    if (u->fd_buf >= 0 && !uring_can_direct(u, off, len))
+        return u->fd_buf;
+    return u->fd;
+}
+
 static int uring_xfer(io_uring *u, uint8_t opcode, void *buf, uint64_t off, size_t len)
 {
     int attempt = 0;
+    int xfd;
 
     if (len > UINT32_MAX)
         return -EINVAL;
+
+    xfd = uring_fd_for(u, off, len);
 
     for (;;) {
         struct io_uring_sqe *sqe = u->sqes;
@@ -278,7 +301,7 @@ static int uring_xfer(io_uring *u, uint8_t opcode, void *buf, uint64_t off, size
 
         memset(sqe, 0, sizeof *sqe);
         sqe->opcode = opcode;
-        sqe->fd = u->fd;
+        sqe->fd = xfd;
         sqe->off = off;
         sqe->addr = (uint64_t)(uintptr_t)buf;
         sqe->len = (uint32_t)len;
@@ -316,27 +339,37 @@ static int uring_write(io_ops *o, const void *buf, uint64_t off, size_t len)
     return uring_xfer((io_uring *)o, IORING_OP_WRITE, (void *)(uintptr_t)buf, off, len);
 }
 
-static int uring_flush(io_ops *o)
+static int uring_fsync_fd(io_uring *u, int fd)
 {
-    io_uring *u = (io_uring *)o;
     struct io_uring_sqe *sqe = u->sqes;
     int res = 0;
     int r;
 
-    if (!u->writable)
-        return 0;
-
     memset(sqe, 0, sizeof *sqe);
     sqe->opcode = IORING_OP_FSYNC;
-    sqe->fd = u->fd;
+    sqe->fd = fd;
     sqe->fsync_flags = IORING_FSYNC_DATASYNC;
     sqe->user_data = 2;
 
     r = uring_transact(u, &res);
     if (r < 0)
         return r;
-    if (res < 0)
-        return res;
+    return res < 0 ? res : 0;
+}
+
+static int uring_flush(io_ops *o)
+{
+    io_uring *u = (io_uring *)o;
+    int r;
+
+    if (!u->writable)
+        return 0;
+
+    r = uring_fsync_fd(u, u->fd);
+    if (r != 0)
+        return r;
+    if (u->fd_buf >= 0 && u->fd_buf != u->fd)
+        return uring_fsync_fd(u, u->fd_buf);
     return 0;
 }
 
@@ -354,6 +387,8 @@ static void uring_close(io_ops *o)
         close(u->ring_fd);
     if (u->fd >= 0)
         close(u->fd);
+    if (u->fd_buf >= 0 && u->fd_buf != u->fd)
+        close(u->fd_buf);
     free(u->ops.stats);
     free(u);
 }
@@ -371,18 +406,41 @@ static int uring_probe_supported(void)
     return 1;
 }
 
-io_ops *io_uring_open(const char *path, int writable, uint64_t capacity, int *err)
+static int uring_open_fd(const char *path, int writable, int direct)
+{
+    int flags = (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC | O_NOCTTY;
+
+    if (direct)
+        flags |= O_DIRECT;
+    return open(path, flags);
+}
+
+io_ops *io_uring_open(const char *path, int writable, int want_direct, uint64_t capacity, int *err)
 {
     struct io_uring_params params;
     io_uring *u;
-    int fd, ring_fd, saved;
+    int fd = -1, fd_buf = -1, ring_fd, saved;
+    int direct_active = 0;
 
     if (!uring_probe_supported()) {
         *err = ENOTSUP;
         return NULL;
     }
 
-    fd = open(path, (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC | O_NOCTTY);
+    if (want_direct) {
+        fd = uring_open_fd(path, writable, 1);
+        if (fd >= 0) {
+            fd_buf = uring_open_fd(path, writable, 0);
+            if (fd_buf >= 0) {
+                direct_active = 1;
+            } else {
+                close(fd);
+                fd = -1;
+            }
+        }
+    }
+    if (fd < 0)
+        fd = uring_open_fd(path, writable, 0);
     if (fd < 0) {
         *err = errno;
         return NULL;
@@ -393,16 +451,21 @@ io_ops *io_uring_open(const char *path, int writable, uint64_t capacity, int *er
     if (ring_fd < 0) {
         *err = errno;
         close(fd);
+        if (fd_buf >= 0)
+            close(fd_buf);
         return NULL;
     }
 
     u = xalloc(sizeof *u);
     u->fd = fd;
+    u->fd_buf = fd_buf;
     u->ring_fd = ring_fd;
     u->writable = writable;
     u->ring_entries = params.sq_entries;
     u->ops.stats = xalloc(sizeof *u->ops.stats);
     u->ops.stats->capacity = capacity;
+    u->ops.stats->direct_requested = want_direct;
+    u->ops.stats->direct_active = direct_active;
 
     if (uring_mmap_rings(u, &params) != 0) {
         saved = errno;
@@ -430,10 +493,11 @@ void io_uring_probe(const char *path, int *supported, int *err)
 
 #else
 
-io_ops *io_uring_open(const char *path, int writable, uint64_t capacity, int *err)
+io_ops *io_uring_open(const char *path, int writable, int want_direct, uint64_t capacity, int *err)
 {
     (void)path;
     (void)writable;
+    (void)want_direct;
     (void)capacity;
     *err = ENOTSUP;
     return NULL;

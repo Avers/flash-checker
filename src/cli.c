@@ -65,6 +65,7 @@ void cli_usage(FILE *f, const char *prog)
             "      --boundary-resolution SIZE  bisection step, default 64MiB\n"
             "      --direct/--no-direct     force or forbid O_DIRECT\n"
             "      --io-backend KIND     sync | uring, default sync\n"
+            "                            (uring needs a FLASHCHECK_IO_URING=1 build)\n"
             "\n"
             "output:\n"
             "      --json FILE         write a JSON report\n"

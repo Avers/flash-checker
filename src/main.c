@@ -103,17 +103,22 @@ int main(int argc, char **argv)
         if (cfg.want_direct < 0)
             cfg.want_direct = dev.direct_supported;
 
-#ifdef FLASHCHECK_IO_URING
         if (cfg.io_backend == IO_BACKEND_URING) {
-            io = io_uring_open(dev.path, cfg.mode != MODE_IDENTIFY, dev.capacity, &rc);
+#ifdef FLASHCHECK_IO_URING
+            io = io_uring_open(dev.path, cfg.mode != MODE_IDENTIFY, cfg.want_direct, dev.capacity,
+                               &rc);
             if (io == NULL) {
                 log_warn("io_uring not available, falling back to sync: %s", errno_str(rc));
                 io = io_sync_open(dev.path, cfg.mode != MODE_IDENTIFY, cfg.want_direct, dev.capacity,
                                   &rc);
             }
-        } else
+#else
+            log_warn("--io-backend=uring requested but this build has no io_uring support, "
+                     "using sync (rebuild with FLASHCHECK_IO_URING=1)");
+            io = io_sync_open(dev.path, cfg.mode != MODE_IDENTIFY, cfg.want_direct, dev.capacity,
+                              &rc);
 #endif
-        {
+        } else {
             io = io_sync_open(dev.path, cfg.mode != MODE_IDENTIFY, cfg.want_direct, dev.capacity,
                               &rc);
         }

@@ -26,7 +26,7 @@ io_ops *io_sync_open(const char *path, int writable, int want_direct, uint64_t c
                      int *err);
 void io_sync_probe_direct(const char *path, int *supported, int *err);
 
-io_ops *io_uring_open(const char *path, int writable, uint64_t capacity, int *err);
+io_ops *io_uring_open(const char *path, int writable, int want_direct, uint64_t capacity, int *err);
 void io_uring_probe(const char *path, int *supported, int *err);
 
 #define FAKE_HONEST 0

@@ -1,6 +1,6 @@
-# Session Status — io_uring Backend (Correctness Fix + Test Coverage)
+# Session Status — io_uring Backend (Correctness, Tests, O_DIRECT)
 
-## Correction to Previous Session's Report
+## Correction to the Original io_uring Report
 
 Commit `3fb6c63` ("feat(io): add io_uring backend with raw syscalls") claimed
 "`make` builds successfully" and "self-tests pass with both backends". Both were
@@ -13,23 +13,14 @@ wrong:
 
 ---
 
-## Completed in This Session
-
-### Files Changed
-
-| File | Status | Description |
-|------|--------|-------------|
-| `src/io/uring.c` | Rewritten | Corrected opcodes, ring-offset parsing, mmap sizing, SQE layout, barriers, cleanup |
-| `include/flashcheck/io.h` | Modified | `io_uring_open()`/`io_uring_probe()` declared unconditionally (they were always compiled) |
-| `tests/test_uring.c` | **NEW** | Functional test against a temp file — real io_uring round trip |
-| `tests/test_main.c` | Modified | Registers `test_uring()` |
+## Round 1 — Correctness Fix + Test Coverage (commit `4f3c88c`)
 
 ### Bugs Fixed in `src/io/uring.c`
 
 | Bug | Was | Effect |
 |-----|-----|--------|
 | Wrong opcodes | `READV=7, WRITEV=9, FSYNC=10` | Kernel sees `POLL_REMOVE`/`SENDMSG`/`RECVMSG`; real values are `READ=22, WRITE=23, FSYNC=3` |
-| `READV` with raw buffer | `addr`=buffer, `len`=bytes | Needs `IORING_OP_READ`/`WRITE` (or a real iovec) |
+| `READV` with raw buffer | `addr`=buffer, `len`=bytes | Needs `IORING_OP_READ`/`WRITE` |
 | Ring offsets read from `params+0/+4` | `sq_entries`/`cq_entries` used as offsets | mmap size ~64 B instead of ~2 KB → garbage / segfault |
 | `sq_off`/`cq_off` base | `sq` at 0, `cq` at +64 | Real offsets are 40 and 80 |
 | Stray call | `uring_mmap_rings(NULL, &params)` | NULL deref on every open |
@@ -38,34 +29,43 @@ wrong:
 | `IORING_FEAT_SINGLE_MMAP` | ignored | CQ pointer wrong on modern kernels |
 | head/tail access | plain loads/stores | Needs acquire/release ordering |
 | Retry/`io_errors` accounting | none | Now mirrors `sync.c` (EINTR/EIO/ETIMEDOUT/EBUSY with backoff) |
-| `direct_requested/active` | reported `1` | Now honest `0` — this backend does not use `O_DIRECT` |
 
-Layouts are now pinned with `_Static_assert` (SQE 64 B, CQE 16 B, params 120 B,
+Layouts are pinned with `_Static_assert` (SQE 64 B, CQE 16 B, params 120 B,
 `sq_off`@40, `cq_off`@80).
 
-### New Test Coverage
+`tests/test_uring.c` was added (registered in `tests/test_main.c`), and
+`include/flashcheck/io.h` declares `io_uring_open`/`io_uring_probe`
+unconditionally so default-build tests can reach them (they were always compiled).
 
-`tests/test_uring.c` runs in every `make test` (skips with `[skip]` if the kernel
-lacks io_uring):
+---
 
-- backend identity + capacity stats
-- write/read round trip and data verification
-- visibility of data written through the page cache path
-- read past EOF → error and `io_errors` increment
-- 100 write/read iterations to exercise ring head/tail reuse
-- `flush()` (fsync SQE)
+## Round 2 — io_uring Quick Wins (this round)
 
-### Verification
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/main.c` | `--io-backend=uring` in a build without `FLASHCHECK_IO_URING` now **warns** ("rebuild with FLASHCHECK_IO_URING=1") instead of silently running sync |
+| `src/cli.c` | `--help` notes the build-flag requirement |
+| `include/flashcheck/io.h` | `io_uring_open(path, writable, want_direct, capacity, err)` — same signature shape as `io_sync_open` |
+| `src/io/uring.c` | `O_DIRECT` support: direct fd + buffered companion, per-transfer fd choice using sync's rules (512 B sector alignment + capacity bounds), `flush()` fsyncs both fds, `close()` releases both; `direct_requested`/`direct_active` report reality |
+| `tests/test_uring.c` | Two suites: buffered mode and `want_direct=1` mode (aligned buffers), incl. unaligned-offset fallback and ring-reuse |
+
+### Verification (all exit 0)
 
 | Command | Result |
 |---------|--------|
-| `make` | ✅ builds clean (gcc 16, `-Werror`) |
-| `make FLASHCHECK_IO_URING=1` | ✅ builds clean |
-| `make test` (both variants) | ✅ **176 checks, 0 failures** + all CLI smoke tests (was 162) |
-| `make asan` (both variants) | ✅ AddressSanitizer + UBSan clean |
+| `make test` | ✅ **193 checks, 0 failures** + CLI smoke (176 → 193 this round; 162 originally) |
+| `make FLASHCHECK_IO_URING=1 test` | ✅ 193 checks, 0 failures |
+| `make asan` | ✅ sanitizer-clean, 193 checks |
+| `make asan FLASHCHECK_IO_URING=1` | ✅ sanitizer-clean, 193 checks |
 
-Tested on kernel `7.1.5+kali-amd64`, `io_uring_setup` features `0x3ffff`.
-No block device was used — all uring I/O ran against a temp file.
+Environment: gcc 16.2, kernel `7.1.5+kali-amd64`, io_uring features `0x3ffff`.
+The test log prints `[info] O_DIRECT active: yes`, so the direct path really runs.
+
+**Still untested:** the new warning branch in `main.c` needs a block device to get
+past `device_probe()` — cannot be exercised without a real `/dev/...` target
+(AGENTS.md requires approval for that).
 
 ---
 
@@ -75,7 +75,7 @@ No block device was used — all uring I/O ran against a temp file.
 - **Phase 0 (Research)**: ✅ Complete (design.md, IMPLEMENTATION_PLAN.md)
 - **Phase 1 (Skeleton + v0.1)**: ✅ Complete
 - **Phase 2 (Patterns, Sparse, Retention, Boundary)**: ✅ Complete
-- **Phase 3 (Performance)**: 🟡 io_uring backend now correct + tested; read-path parallelization pending
+- **Phase 3 (Performance)**: 🟡 io_uring backend correct, tested and O_DIRECT-aware; read-path parallelization pending
 - **Phase 4 (Reporting/Resume/Orchestration)**: ✅ Mostly complete
 
 ### What's Next (Priority Order)
@@ -89,14 +89,11 @@ No block device was used — all uring I/O ran against a temp file.
 
 ### Known Follow-ups (io_uring)
 
-1. `--io-backend=uring` is accepted by the CLI but **silently ignored** in builds
-   without `FLASHCHECK_IO_URING=1` — should warn instead.
-2. The uring backend never opens with `O_DIRECT` (unlike sync) — pass
-   `cfg.want_direct` into `io_uring_open()` and use aligned buffers
-   (pipeline buffers are already `FC_ALIGN`-aligned).
-3. Single SQE/CQE, submit-and-wait per op — batching is the natural next step
-   and a prerequisite for read-path parallelization.
-4. Real-hardware comparison of `--io-backend=uring` vs `sync` still outstanding.
+1. Single SQE/CQE, submit-and-wait per op — batching is the natural next step and
+   a prerequisite for read-path parallelization.
+2. Real-hardware comparison of `--io-backend=uring` vs `sync` still outstanding.
+3. Exercise the `--io-backend=uring` CLI path (and its warning) on a real block
+   device — needs developer approval.
 
 ---
 
@@ -107,23 +104,26 @@ No block device was used — all uring I/O ran against a temp file.
 3. io_uring requires kernel 5.1+ (`IORING_OP_READ`/`WRITE` need 5.6+)
 4. Test with USB 2.0/3.0 flash drives to verify no regression
 5. **Never trust `--self-test` as backend coverage — it always uses the fake device**
+6. `--direct/--no-direct` now applies to the uring backend as well
 
 ---
 
-## Commit
+## Commits
 
 ```
-fix(io): correct io_uring opcodes and ring offsets, add functional test
+4f3c88c fix(io): correct io_uring opcodes and ring offsets, add functional test
+```
 
-- Use IORING_OP_READ/WRITE/FSYNC (22/23/3); old defines were POLL_REMOVE,
-  SENDMSG and RECVMSG
-- Parse sq_off/cq_off at their real params offsets (40/80) and size the ring
-  mmaps from them (was mmapping ~64 bytes)
-- Handle IORING_FEAT_SINGLE_MMAP, fix 56B -> 64B SQE layout, remove NULL
-  mmap call, munmap with real sizes, add acquire/release barriers
-- Report O_DIRECT honestly as inactive for this backend
-- New tests/test_uring.c exercises the backend on a temp file (176 checks,
-  was 162); declare io_uring_open/io_uring_probe unconditionally so the
-  default build's tests can reach them
-- Verified: make, FLASHCHECK_IO_URING=1, make test, make asan (both variants)
+```
+feat(io): honour --direct in the io_uring backend, warn when uring is unavailable
+
+- io_uring_open() gains want_direct and opens an O_DIRECT fd plus a buffered
+  companion, picking per transfer with the same sector/capacity rules as the
+  sync backend; flush() fsyncs both fds
+- direct_requested/direct_active now report what the backend actually does
+- requesting --io-backend=uring in a build without FLASHCHECK_IO_URING logs a
+  warning instead of silently falling back to sync; --help documents the flag
+- tests cover buffered and O_DIRECT modes, including the unaligned fallback
+- Verified: make, FLASHCHECK_IO_URING=1, make test and make asan in both
+  variants; 193 checks, 0 failures (was 176)
 ```
