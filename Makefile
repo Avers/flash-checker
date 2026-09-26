@@ -1,7 +1,7 @@
 CC      ?= cc
 CFLAGS  ?= -O2 -g
 WARN     = -Wall -Wextra -Werror -Wshadow -Wpointer-arith -Wcast-qual -Wno-unused-parameter
-DEFS     = -D_GNU_SOURCE -DFILE_OFFSET_BITS=64
+DEFS     = -D_GNU_SOURCE -DFILE_OFFSET_BITS=64 -DVERSION_STR=\"$(VERSION)\"
 INC      = -Iinclude
 ALLCFLAGS = -std=c11 $(WARN) $(DEFS) $(INC) $(CFLAGS)
 
@@ -16,7 +16,9 @@ TESTOBJ  = $(patsubst %.c,build/%.o,$(TESTSRC))
 TESTBIN  = build/flashcheck-tests
 LIBOBJ   = $(filter-out $(MAIN_OBJ),$(OBJ))
 
-.PHONY: all clean test asan debug lint install
+.PHONY: all clean test asan debug lint install version bump
+
+VERSION := $(shell cat VERSION 2>/dev/null || echo "0.0.0")
 
 all: $(BIN)
 
@@ -61,3 +63,31 @@ install: $(BIN)
 
 clean:
 	rm -rf build
+
+version:
+	@echo $(VERSION)
+
+bump:
+	@if [ -z "$(part)" ]; then \
+		echo "Usage: make bump part=patch|minor|major"; \
+		exit 1; \
+	fi; \
+	v=$$(cat VERSION); \
+	major=$$(echo $$v | cut -d. -f1); \
+	minor=$$(echo $$v | cut -d. -f2); \
+	patch=$$(echo $$v | cut -d. -f3); \
+	if [ "$(part)" = "patch" ]; then \
+		patch=$$((patch + 1)); \
+	elif [ "$(part)" = "minor" ]; then \
+		minor=$$((minor + 1)); \
+		patch=0; \
+	elif [ "$(part)" = "major" ]; then \
+		major=$$((major + 1)); \
+		minor=0; patch=0; \
+	else \
+		echo "Unknown part: $(part). Use patch, minor, or major"; \
+		exit 1; \
+	fi; \
+	echo "$$major.$$minor.$$patch" > VERSION; \
+	echo "Bumped to $$major.$$minor.$$patch"; \
+	git tag -a "v$$major.$$minor.$$patch" -m "Release v$$major.$$minor.$$patch" 2>/dev/null && echo "Tag v$$major.$$minor.$$patch created" || echo "Could not create git tag"

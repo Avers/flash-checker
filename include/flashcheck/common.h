@@ -13,7 +13,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define FC_VERSION "0.1.0"
+#ifndef FC_VERSION
+#define FC_VERSION VERSION_STR
+#endif
 #define FC_PROG "flashcheck"
 
 #ifndef FC_ALIGN

@@ -148,3 +148,36 @@ See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the development roadmap
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Versioning
+
+This project follows [Semantic Versioning 2.0](https://semver.org/).
+
+Format: `MAJOR.MINOR.PATCH` (e.g., `0.1.0`)
+
+### Rules
+
+| Bump | When |
+|------|------|
+| **PATCH** | Bug fixes, non-breaking changes |
+| **MINOR** | New features, backwards-compatible additions |
+| **MAJOR** | Breaking changes, removal of features |
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `VERSION` | Single source of truth for the current version |
+| `CHANGELOG.md` | All notable changes |
+| `include/flashcheck/common.h` | `FC_VERSION` macro (auto-generated from `VERSION`) |
+
+### Commands
+
+```sh
+make version              # print current version
+make bump patch           # bump PATCH version
+make bump minor           # bump MINOR version
+make bump major           # bump MAJOR version
+```
+
+> **Note:** `FC_VERSION` is injected at compile time via `-DVERSION_STR` from `VERSION`. No manual edits to `common.h` needed.
