@@ -102,6 +102,9 @@ flashcheck/
 ├── Makefile
 ├── README.md
 ├── LICENSE
+├── VERSION
+├── CHANGELOG.md
+├── CONTRIBUTING.md
 ├── docs/
 │   ├── design.md           # investigation & design document
 │   └── IMPLEMENTATION_PLAN.md # phased implementation plan
@@ -143,7 +146,7 @@ Each chunk is self-identifying via `seed = SHA256(test_id ‖ pass ‖ chunk_ind
 
 ## Contributing
 
-See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the development roadmap.
+All changes require developer approval. See [CONTRIBUTING.md](CONTRIBUTING.md) for rules.
 
 ## License
 
