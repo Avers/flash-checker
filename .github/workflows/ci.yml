@@ -8,8 +8,9 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix:
         build-type: [release, debug, asan]
 
@@ -21,25 +22,48 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential clang-tidy
 
-      - name: Build and test (release)
+      - name: Build (release)
         if: matrix.build-type == 'release'
         run: |
           make clean
           make
-          make test
 
-      - name: Build and test (debug)
+      - name: Build and test (release)
+        if: matrix.build-type == 'release'
+        run: |
+          ./build/flashcheck-tests
+          echo "== CLI smoke =="
+          ./build/flashcheck --version
+          ./build/flashcheck --help >/dev/null
+          ./build/flashcheck --self-test=alias --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 1
+          ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 0
+          ./build/flashcheck --self-test=stale --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 1
+          ./build/flashcheck --self-test=error --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 4
+          echo "== all CLI smoke tests passed =="
+
+      - name: Build (debug)
         if: matrix.build-type == 'debug'
         run: |
           make clean
           make debug
-          make test
 
-      - name: Build and test (sanitizers)
+      - name: Test (debug)
+        if: matrix.build-type == 'debug'
+        run: |
+          ./build/flashcheck-tests
+          ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 0
+
+      - name: Build (asan)
         if: matrix.build-type == 'asan'
         run: |
           make clean
           make asan
+
+      - name: Test (asan)
+        if: matrix.build-type == 'asan'
+        run: |
+          ./build/flashcheck-tests
+          ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 0
 
       - name: Lint
         run: |
@@ -50,3 +74,4 @@ jobs:
           ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB --yes
           ./build/flashcheck --self-test=alias --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 1
           ./build/flashcheck --self-test=stale --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 1
+          ./build/flashcheck --self-test=error --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 4

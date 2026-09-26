@@ -54,7 +54,7 @@ asan: clean
 
 lint:
 	@command -v clang-tidy >/dev/null 2>&1 && clang-tidy --version || echo "clang-tidy not installed; relying on -Werror build"
-	@$(MAKE) --no-print-directory clean all
+	@$(MAKE) --no-print-directory all
 
 install: $(BIN)
 	install -Dm755 $(BIN) $(DESTDIR)/usr/local/bin/flashcheck
