@@ -102,8 +102,21 @@ int main(int argc, char **argv)
         }
         if (cfg.want_direct < 0)
             cfg.want_direct = dev.direct_supported;
-        io = io_sync_open(dev.path, cfg.mode != MODE_IDENTIFY, cfg.want_direct, dev.capacity,
-                          &rc);
+
+#ifdef FLASHCHECK_IO_URING
+        if (cfg.io_backend == IO_BACKEND_URING) {
+            io = io_uring_open(dev.path, cfg.mode != MODE_IDENTIFY, dev.capacity, &rc);
+            if (io == NULL) {
+                log_warn("io_uring not available, falling back to sync: %s", errno_str(rc));
+                io = io_sync_open(dev.path, cfg.mode != MODE_IDENTIFY, cfg.want_direct, dev.capacity,
+                                  &rc);
+            }
+        } else
+#endif
+        {
+            io = io_sync_open(dev.path, cfg.mode != MODE_IDENTIFY, cfg.want_direct, dev.capacity,
+                              &rc);
+        }
         if (io == NULL) {
             log_err("cannot open %s: %s", dev.path, errno_str(rc));
             return EXIT_IOERROR;

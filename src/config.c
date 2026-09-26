@@ -7,6 +7,7 @@ void config_defaults(config *c)
 {
     memset(c, 0, sizeof *c);
     c->mode = MODE_STANDARD;
+    c->io_backend = IO_BACKEND_SYNC;
     c->chunk_size = 8u << 20;
     c->window_size = 1ULL << 30;
     c->passes = 1;

@@ -28,6 +28,7 @@ enum {
     OPT_SELF_TEST,
     OPT_SELF_REPORTED,
     OPT_SELF_REAL,
+    OPT_IO_BACKEND,
     OPT_HELP,
     OPT_VERSION
 };
@@ -63,6 +64,7 @@ void cli_usage(FILE *f, const char *prog)
             "      --boundary-budget SIZE   max bytes for the capacity search, default 8GiB\n"
             "      --boundary-resolution SIZE  bisection step, default 64MiB\n"
             "      --direct/--no-direct     force or forbid O_DIRECT\n"
+            "      --io-backend KIND     sync | uring, default sync\n"
             "\n"
             "output:\n"
             "      --json FILE         write a JSON report\n"
@@ -132,6 +134,7 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
         { "json", required_argument, NULL, OPT_JSON },
         { "checkpoint", required_argument, NULL, OPT_CHECKPOINT },
         { "resume", no_argument, NULL, OPT_RESUME },
+        { "io-backend", required_argument, NULL, OPT_IO_BACKEND },
         { "direct", no_argument, NULL, OPT_DIRECT },
         { "no-direct", no_argument, NULL, OPT_NO_DIRECT },
         { "yes", no_argument, NULL, OPT_YES },
@@ -211,6 +214,16 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
             break;
         case OPT_RESUME:
             c->resume = 1;
+            break;
+        case OPT_IO_BACKEND:
+            if (strcmp(optarg, "sync") == 0)
+                c->io_backend = IO_BACKEND_SYNC;
+            else if (strcmp(optarg, "uring") == 0)
+                c->io_backend = IO_BACKEND_URING;
+            else {
+                snprintf(err, errn, "unknown io backend: '%s' (sync|uring)", optarg);
+                return CLI_ERROR;
+            }
             break;
         case OPT_DIRECT:
             c->want_direct = 1;

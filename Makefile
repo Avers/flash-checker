@@ -6,6 +6,10 @@ INC      = -Iinclude
 ALLCFLAGS = -std=c11 $(WARN) $(DEFS) $(INC) $(CFLAGS)
 
 SRCDIRS  = src src/device src/io src/crypto src/pattern src/test src/scheduler src/stats src/report
+
+ifeq ($(FLASHCHECK_IO_URING),1)
+ALLCFLAGS += -DFLASHCHECK_IO_URING
+endif
 SRC      = $(foreach d,$(SRCDIRS),$(wildcard $(d)/*.c))
 MAIN_OBJ = build/src/main.o
 OBJ      = $(patsubst %.c,build/%.o,$(SRC))

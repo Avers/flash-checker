@@ -11,6 +11,11 @@ typedef enum {
     MODE_FULL = 3
 } run_mode;
 
+typedef enum {
+    IO_BACKEND_SYNC = 0,
+    IO_BACKEND_URING = 1,
+} io_backend;
+
 typedef struct {
     const char *device;
     run_mode mode;
@@ -19,6 +24,7 @@ typedef struct {
     int dry_run;
     int verbose;
     int want_direct;
+    io_backend io_backend;
     uint64_t chunk_size;
     uint64_t window_size;
     uint64_t limit;
