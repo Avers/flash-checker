@@ -75,7 +75,6 @@ RESULT: FAIL
 | 2 | INCONCLUSIVE |
 | 3 | Usage/safety error |
 | 4 | I/O error |
-
 ## Building from source
 
 ```sh
@@ -85,6 +84,100 @@ make test               # unit + fake-device detection tests
 make asan               # full test suite under sanitizers
 make lint               # clang-tidy if available, else -Werror build
 make clean              # remove build artifacts
+make version            # print current version
+make bump part=patch    # bump version (patch|minor|major)
+```
+
+## macOS Setup
+
+### Prerequisites
+
+Xcode Command Line Tools must be installed:
+
+```sh
+xcode-select --install
+```
+
+This provides `clang` (the `cc` compiler), `make`, and standard headers.
+
+### Build
+
+```sh
+make                     # build → build/flashcheck
+./build/flashcheck --version   # verify
+```
+
+The Makefile detects the platform automatically. On macOS:
+- Uses `clang` instead of `gcc`
+- Uses `DKIOCGETBLOCKCOUNT`/`DKIOCGETBLOCKSIZE` instead of Linux `BLKGETSIZE64`
+- `O_DIRECT` is disabled (not supported on macOS)
+
+### Running on macOS
+
+```sh
+# Check what devices are available
+diskutil list
+
+# Identify a device (no writes needed)
+sudo ./build/flashcheck /dev/disk8s1 --identify
+
+# Unmount before destructive testing
+sudo diskutil unmountDisk /dev/disk8s1
+
+# Standard test (destructive)
+sudo ./build/flashcheck /dev/disk8s1 --destructive --yes
+
+# Dry run (see the plan, write nothing)
+sudo ./build/flashcheck /dev/disk8s1 --destructive --dry-run --yes
+
+# Self-test (no hardware needed)
+./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB --yes
+```
+
+### macOS Notes
+
+| Topic | Detail |
+|-------|--------|
+| Device path | `/dev/diskN` (whole disk), `/dev/diskNs` (partition N) |
+| Unmounting | `sudo diskutil unmountDisk /dev/diskN` |
+| Root access | `sudo` required for raw block device access |
+| `O_DIRECT` | Not supported on macOS; auto-disabled |
+| Capacity detection | Uses macOS `DKIOCGETBLOCKCOUNT` ioctl |
+| `diskutil` | Can be used to check device info before testing |
+
+### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| `command not found: make` | Run `xcode-select --install` |
+| `command not found: cc` | Run `xcode-select --install` |
+| `Permission denied` on `/dev/disk*` | Use `sudo` |
+| `device is mounted` | Run `sudo diskutil unmountDisk /dev/diskN` first |
+| `cannot determine capacity` | Device may not be a block device; check `diskutil list` |
+
+## Install
+
+```sh
+sudo make install        # install to /usr/local/bin/flashcheck
+```
+
+## Usage
+
+```sh
+# Identify a device (no writes)
+sudo flashcheck /dev/disk8s1 --identify
+
+# Standard test (destructive, requires --yes to skip confirmation)
+sudo flashcheck /dev/disk8s1 --destructive --yes
+
+# Full test with custom block size
+sudo flashcheck /dev/disk8s1 --destructive --yes --mode full --block-size 16MiB
+
+# Dry run (see the plan, write nothing)
+sudo flashcheck /dev/disk8s1 --destructive --dry-run --yes
+
+# Self-test (no hardware needed)
+flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB
 ```
 
 ## Safety
@@ -98,7 +191,6 @@ make clean              # remove build artifacts
 ## Project Structure
 
 ```
-flashcheck/
 ├── Makefile
 ├── README.md
 ├── LICENSE

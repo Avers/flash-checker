@@ -21,6 +21,6 @@ Thumbs.db
 core
 *.core
 
-# CI artifacts
-*.log
-coverage/
+# Opencode
+.opencode/node_modules/
+.opencode/package*.json
