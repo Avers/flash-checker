@@ -236,6 +236,26 @@ flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB
 
 Each chunk is self-identifying via `seed = SHA256(test_id ‖ pass ‖ chunk_index)`, enabling streaming verification without storing data.
 
+## Design Principles
+
+The core concept of flash-checker is to detect USB flash devices that report more capacity than they really have. The key design principles are:
+
+- **Unique reproducible data**: Each write chunk uses a deterministic pattern seeded with `SHA256(test_id ‖ pass ‖ chunk_index)`, enabling streaming verification without storing all data in memory
+- **Multi-stage testing**: Exponential growth + bisection to find the reliable capacity boundary, with sparse probe, retention, and full verify stages
+- **Alias detection**: Identifies when two LBA addresses return the same data (controller mapping multiple logical addresses to the same physical storage)
+- **Stale data detection**: Detects controllers that discard old data when writing past real capacity
+- **Wear leveling resistance**: Tests must survive controller garbage wear leveling and garbage collection mechanisms
+- **Sliding window**: A compromise between speed and reliability, forcing the controller to simultaneously support many unique data regions
+- **Retention test**: The most important test — write unique data, then write new data far beyond, and verify old data still survives. This is the strongest way to detect fake capacity simulators.
+
+Supported operating systems:
+
+| OS | Status | Notes |
+|----|--------|-------|
+| **macOS** | Supported | Full support via `DKIOCGETBLOCKCOUNT`/`DKIOCGETBLOCKSIZE` ioctl. `O_DIRECT` disabled. Requires Xcode Command Line Tools. |
+| **Linux** | Supported | Uses `BLKGETSIZE64`, `BLKSSZGET`, `BLKPBSZGET` ioctl. `O_DIRECT` optional. Tested with raw block devices (`/dev/sdX`). |
+| **Other Unix** | Partial | POSIX-compliant systems should work with appropriate ioctl adaptation. |
+
 ## Contributing
 
 All changes require developer approval. See [CONTRIBUTING.md](CONTRIBUTING.md) for rules.
