@@ -12,6 +12,8 @@ typedef struct {
     uint64_t bytes_written;
     uint64_t bytes_verified;
     uint64_t errors;
+    double write_sec;
+    double read_sec;
     int complete;
 } checkpoint;
 

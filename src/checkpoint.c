@@ -9,6 +9,7 @@ static void cp_parse(const char *txt, checkpoint *cp)
 {
     char stage[CP_STAGE_MAX] = { 0 };
     unsigned long long id = 0, off = 0, bw = 0, bv = 0, er = 0;
+    double ws = 0, rs = 0;
     int complete = 0;
     const char *p = txt;
 
@@ -26,6 +27,10 @@ static void cp_parse(const char *txt, checkpoint *cp)
             } else if (sscanf(line, "bytes_written=%llu", &bw) == 1) {
             } else if (sscanf(line, "bytes_verified=%llu", &bv) == 1) {
             } else if (sscanf(line, "errors=%llu", &er) == 1) {
+            } else if (sscanf(line, "write_sec=%lf", &ws) == 1) {
+                cp->write_sec = ws;
+            } else if (sscanf(line, "read_sec=%lf", &rs) == 1) {
+                cp->read_sec = rs;
             } else if (sscanf(line, "complete=%d", &complete) == 1) {
             }
         }
@@ -37,6 +42,8 @@ static void cp_parse(const char *txt, checkpoint *cp)
     cp->bytes_written = bw;
     cp->bytes_verified = bv;
     cp->errors = er;
+    cp->write_sec = ws;
+    cp->read_sec = rs;
     cp->complete = complete;
 }
 
@@ -75,13 +82,13 @@ int checkpoint_save(const char *path, const checkpoint *cp)
     fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     if (fd < 0)
         return -1;
-    n = snprintf(txt, sizeof txt,
-                 "# %s %s\nstage=%s\ntest_id=%llu\noffset=%llu\nbytes_written=%llu\n"
-                 "bytes_verified=%llu\nerrors=%llu\ncomplete=%d\n",
-                 FC_PROG, FC_VERSION, cp->stage, (unsigned long long)cp->test_id,
-                 (unsigned long long)cp->offset, (unsigned long long)cp->bytes_written,
-                 (unsigned long long)cp->bytes_verified, (unsigned long long)cp->errors,
-                 cp->complete);
+n = snprintf(txt, sizeof txt,
+             "# %s %s\nstage=%s\ntest_id=%llu\noffset=%llu\nbytes_written=%llu\n"
+             "bytes_verified=%llu\nerrors=%llu\nwrite_sec=%.3f\nread_sec=%.3f\ncomplete=%d\n",
+             FC_PROG, FC_VERSION, cp->stage, (unsigned long long)cp->test_id,
+             (unsigned long long)cp->offset, (unsigned long long)cp->bytes_written,
+             (unsigned long long)cp->bytes_verified, (unsigned long long)cp->errors,
+             cp->write_sec, cp->read_sec, cp->complete);
     if (n < 0 || (size_t)n >= sizeof txt || write(fd, txt, (size_t)n) != n) {
         close(fd);
         unlink(tmp);
