@@ -121,23 +121,56 @@ wait-on-`cv_done` instead of spin (and `release` now broadcasts).
 
 ---
 
+## Round 4 — Safety Realism, Stage Speed Stats, Adaptive Default (PRs #4–#7)
+
+### What Landed
+
+| PR | Commit | Change |
+|----|--------|--------|
+| #4 | `a089a25` | `safety.c`: real mount detection — Linux `/proc/mounts` (`safety_mount_matches`, suffix-aware for `s<n>`, `p<n>`, digits) + macOS `getfsstat(MNT_NOWAIT)`; swaps/holders kept; `diskutil unmountDisk` hint; tests + README |
+| #5 | `557eb92` | `main.c`: `safety_check` now runs **before** the writable open — macOS `EBUSY` used to beat the refusal with a generic exit-4 `device busy`; `device_probe` failure on a mounted partition maps to the friendly `device is in use` message; `lock_fd` open failure reports the real errno instead of "another flashcheck instance" |
+| #6 | `f82cea6` | sparse/retention/boundary track write/read speed (were reported as `0.00s (0.00 B)`); sparse re-inits the read track so verify rates exclude write time |
+| #7 | `87add86` | **`adaptive` is the new default mode**: standard detector chain, stop at first failure with capacity estimate, escalate to `full-verify` only when no counter-evidence was found; `--mode quick` now actually stops after the sparse probe (it ran retention + capacity search before); README warns the default writes the entire reported capacity |
+
+### Real-Hardware Validation (macOS, `/dev/disk8` 1.1 TB fake-size USB)
+
+- Detection: `RESULT: FAIL, first failure at 4.00 GiB` vs claimed 1000.00 GiB (quick mode)
+- Mounted refusal: exit 3 + `run: diskutil unmountDisk /dev/disk8`, **no bench stage ran** (verified on dry-run and real write path)
+- Identify on a mounted partition: `device is in use (...); run: diskutil unmountDisk`, exit 3
+- Unmounted: identify/dry-run proceed, exit 0; volume reformatted after the destructive test (approved)
+
+### Verification (all green)
+
+| Command | Result |
+|---------|--------|
+| `make clean && make` | ✅ `-Werror` clean |
+| `./build/flashcheck-tests` | ✅ **262 checks, 0 failures** (235 → 262) |
+| `make test` / `make asan` | ✅ CLI smoke green (self-test exits: honest 0, alias 1, stale 1, error 4) |
+| mode matrix (self-test) | ✅ default=adaptive escalates + PASS; quick stops after sparse + INCONCLUSIVE (exit 2); standard stops at boundary + PASS |
+
+---
+
 ## Current Project Status
 
 ### Phase Completion
 - **Phase 0 (Research)**: ✅ Complete (design.md, IMPLEMENTATION_PLAN.md)
 - **Phase 1 (Skeleton + v0.1)**: ✅ Complete
 - **Phase 2 (Patterns, Sparse, Retention, Boundary)**: ✅ Complete
-- **Phase 3 (Performance)**: 🟡 io_uring backend correct/tested/O_DIRECT-aware; read-path parallelization done (generator pool, `--depth`); bench subcommand + uring batching still open
-- **Phase 4 (Reporting/Resume/Orchestration)**: ✅ Mostly complete
+- **Phase 3 (Performance)**: 🟡 io_uring backend correct/tested/O_DIRECT-aware; read-path parallelization done (generator pool, `--depth`); bench subcommand done (PR #3); uring batching still open
+- **Phase 4 (Reporting/Resume/Orchestration)**: ✅ Complete (adaptive orchestration landed in PR #7)
 
 ### What's Next (Priority Order)
 
 | Priority | Task | Phase | Effort |
 |----------|------|-------|--------|
-| 1 | Bench subcommand for generator vs device throughput | P3 | Low |
-| 2 | Fix `make asan` flag propagation (Makefile) | — | Low |
-| 3 | macOS safety improvements (diskutil/IOKit mount detection) | P4 | Medium |
-| 4 | Adaptive orchestration enhancements (auto-escalate) | P4 | Low |
+| 1 | Fix `make asan` flag propagation (Makefile) | — | Low |
+| 2 | io_uring SQE/CQE batching (submit-and-wait per op) | P3 | Medium |
+| 3 | Batched release: `CHANGELOG.md` + `VERSION` bump | — | Low |
+| 4 | Real-hardware `--io-backend=uring` vs `sync` comparison | P3 | Low |
+
+Landed this session: bench subcommand (PR #3), macOS/Linux mount detection
+(PR #4), mount-refusal ordering (PR #5), stage speed stats (PR #6),
+adaptive default (PR #7).
 
 ### Known Follow-ups (io_uring)
 
