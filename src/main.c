@@ -101,11 +101,30 @@ int main(int argc, char **argv)
                  fake_policy_name(cfg.self_test));
     } else {
         if (device_probe(cfg.device, &dev, err, sizeof err) != 0) {
-            log_err("%s", err);
+            char detail[512];
+
+            if (safety_is_mounted(cfg.device, detail, sizeof detail)) {
+#ifdef __APPLE__
+                log_err("cannot access %s: device is in use (%s); run: "
+                        "diskutil unmountDisk %s", cfg.device, detail, cfg.device);
+#else
+                log_err("cannot access %s: device is in use (%s); unmount it first",
+                        cfg.device, detail);
+#endif
+            } else {
+                log_err("%s", err);
+            }
             return EXIT_USAGE;
         }
         if (cfg.want_direct < 0)
             cfg.want_direct = dev.direct_supported;
+
+        if (cfg.mode != MODE_IDENTIFY) {
+            if (safety_check(&cfg, &dev, -1, err, sizeof err) != 0) {
+                log_err("%s", err);
+                return EXIT_USAGE;
+            }
+        }
 
         if (cfg.io_backend == IO_BACKEND_URING) {
 #ifdef FLASHCHECK_IO_URING
@@ -131,15 +150,13 @@ int main(int argc, char **argv)
             return EXIT_IOERROR;
         }
         lock_fd = open(dev.path, O_RDONLY | O_CLOEXEC);
+        if (lock_fd < 0) {
+            log_err("cannot open %s: %s", dev.path, errno_str(errno));
+            return EXIT_IOERROR;
+        }
         if (safety_lock_device(lock_fd) != 0) {
             log_err("another %s instance seems to be running on %s", FC_PROG, dev.path);
             return EXIT_USAGE;
-        }
-        if (cfg.mode != MODE_IDENTIFY) {
-            if (safety_check(&cfg, &dev, lock_fd, err, sizeof err) != 0) {
-                log_err("%s", err);
-                return EXIT_USAGE;
-            }
         }
         if (cfg.dry_run) {
             safety_plan(&cfg, &dev);
