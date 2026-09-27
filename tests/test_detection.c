@@ -237,11 +237,50 @@ static void test_safety_mounted(void)
 {
     char detail[512];
 
-    T_BEGIN("mount detection flags real mounts");
-    CHECK(safety_is_mounted("/dev/sda1", detail, sizeof detail) == 0 ||
-          safety_is_mounted("/dev/sda1", detail, sizeof detail) == 1);
+    T_BEGIN("mount matcher covers linux device names");
+    CHECK(safety_mount_matches("/dev/sda", "/dev/sda"));
+    CHECK(safety_mount_matches("/dev/sda1", "/dev/sda"));
+    CHECK(safety_mount_matches("/dev/sda10", "/dev/sda"));
+    CHECK(safety_mount_matches("/dev/nvme0n1p1", "/dev/nvme0n1"));
+    CHECK(safety_mount_matches("/dev/mmcblk0p2", "/dev/mmcblk0"));
+    CHECK(!safety_mount_matches("/dev/sdb1", "/dev/sda"));
+    CHECK(!safety_mount_matches("/dev/sda", "/dev/sda1"));
+    CHECK(!safety_mount_matches("/dev/sda1x", "/dev/sda"));
+    CHECK(!safety_mount_matches("overlay", "/dev/sda"));
+
+    T_BEGIN("mount matcher covers macOS device names");
+    CHECK(safety_mount_matches("/dev/disk8", "/dev/disk8"));
+    CHECK(safety_mount_matches("/dev/disk8s1", "/dev/disk8"));
+    CHECK(safety_mount_matches("/dev/disk8s1s2", "/dev/disk8"));
+    CHECK(safety_mount_matches("/dev/disk8s1s1", "/dev/disk8s1"));
+    CHECK(!safety_mount_matches("/dev/disk80", "/dev/disk8"));
+    CHECK(!safety_mount_matches("/dev/disk8s10", "/dev/disk8s1"));
+    CHECK(!safety_mount_matches("/dev/disk9s1", "/dev/disk8"));
+
+    T_BEGIN("mount detection ignores absent devices");
     detail[0] = '\0';
     CHECK(safety_is_mounted("/dev/definitely-not-a-device-xyz", detail, sizeof detail) == 0);
+    CHECK(detail[0] == '\0');
+
+#ifdef __linux__
+    T_BEGIN("mount detection finds /dev devices from /proc/mounts");
+    {
+        char line[1024], src[256], mnt[256];
+        FILE *f = fopen("/proc/mounts", "r");
+
+        if (f != NULL) {
+            while (fgets(line, sizeof line, f) != NULL) {
+                if (sscanf(line, "%255s %255s", src, mnt) != 2)
+                    continue;
+                if (strncmp(src, "/dev/", 5) != 0)
+                    continue;
+                CHECK(safety_is_mounted(src, detail, sizeof detail) == 1);
+                break;
+            }
+            fclose(f);
+        }
+    }
+#endif
 }
 
 static void test_verdict(void)

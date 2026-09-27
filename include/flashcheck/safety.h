@@ -12,6 +12,7 @@ typedef struct {
 
 int safety_check(const config *c, const device_info *d, int fd, char *err, size_t errn);
 int safety_is_mounted(const char *path, char *detail, size_t dn);
+int safety_mount_matches(const char *source, const char *path);
 int safety_lock_device(int fd);
 void safety_plan(const config *c, const device_info *d);
 
