@@ -53,6 +53,18 @@ flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB
 | `standard` | Probe + retention + capacity search (default) |
 | `full` | Standard + full write/read verify of all reported capacity |
 
+## Tuning
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--block-size SIZE` | `8MiB` | Region size used for write/verify chunks |
+| `--window SIZE` | `1GiB` | Sliding write-then-verify window (`--mode full`) |
+| `--passes N` | `1` | Retention passes |
+| `--pattern KIND` | `chacha20` | Data pattern: `chacha20`, `prng` or `zero` |
+| `--depth N` | `4` | Parallel data-generation depth (0-16); `0`/`1` generates inline, no helper thread |
+
+Run `flashcheck --help` for the full list of tuning flags.
+
 ## Output
 
 ```

@@ -1,8 +1,8 @@
 build/
 *.o
 *.d
-flashcheck
-flashcheck-tests
+/flashcheck
+/flashcheck-tests
 *.elf
 *.bin
 
