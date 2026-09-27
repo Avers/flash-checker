@@ -213,7 +213,7 @@ void report_console(const run_ctx *c, verdict v)
     log_out("");
     if (c->cfg->mode == MODE_IDENTIFY) {
         log_out("NOTE: identify mode performed no test (%s written).", b);
-        log_out("      re-run with --destructive --mode standard to verify capacity.");
+        log_out("      re-run with --destructive to test capacity (default: adaptive).");
         return;
     }
     log_out("RESULT: %s", verdict_str(v));

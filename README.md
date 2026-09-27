@@ -49,9 +49,14 @@ flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB
 | Mode | Description |
 |------|-------------|
 | `identify` | Print device info only, never writes |
-| `quick` | Cheap probe, never certifies capacity |
-| `standard` | Probe + retention + capacity search (default) |
-| `full` | Standard + full write/read verify of all reported capacity |
+| `quick` | Benchmark + sparse probe only, never certifies capacity |
+| `standard` | Probe + retention + capacity search, stops there |
+| `adaptive` | Default. Standard stages, then full write/read verify only when no counter-evidence was found |
+| `full` | Same stages as adaptive, explicit |
+
+On a device that passes every probe, the default `adaptive` mode writes the **entire
+reported capacity** — that full write/read round trip is what certifies it. Use
+`--mode quick`, `--mode standard` or `--limit SIZE` to bound a run.
 
 ## Tuning
 

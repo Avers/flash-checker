@@ -82,12 +82,13 @@ verdict run_verdict(const run_ctx *c)
 
 int run_execute(run_ctx *c)
 {
+    run_mode m = c->cfg->mode;
     stage_report *r;
 
     r = stage_new(c, "identify");
     stage_identify(c, r);
 
-    if (c->cfg->mode == MODE_IDENTIFY)
+    if (m == MODE_IDENTIFY)
         return 0;
 
     r = stage_new(c, "benchmark");
@@ -99,7 +100,7 @@ int run_execute(run_ctx *c)
     r = stage_new(c, "sparse-probe");
     if (stage_sparse(c, r) < 0)
         return -1;
-    if (r->chunks_failed > 0)
+    if (r->chunks_failed > 0 || m == MODE_QUICK)
         return 0;
 
     r = stage_new(c, "retention");
@@ -111,22 +112,19 @@ int run_execute(run_ctx *c)
     r = stage_new(c, "capacity-boundary");
     if (stage_boundary(c, r) < 0)
         return -1;
-    if (r->chunks_failed > 0) {
-        if (r->has_capacity) {
-            c->reliable_capacity = r->reliable_capacity;
-            c->has_capacity = 1;
-        }
-        return 0;
-    }
     if (r->has_capacity) {
         c->reliable_capacity = r->reliable_capacity;
         c->has_capacity = 1;
     }
+    if (r->chunks_failed > 0 || m == MODE_STANDARD)
+        return 0;
 
-    if (c->cfg->mode == MODE_FULL) {
-        r = stage_new(c, "full-verify");
-        if (stage_full(c, r) < 0)
-            return -1;
-    }
+    if (m == MODE_ADAPTIVE)
+        log_out("no counter-evidence from probe, retention and capacity search; "
+                "escalating to full write/read verify (use --mode standard to stop here)");
+
+    r = stage_new(c, "full-verify");
+    if (stage_full(c, r) < 0)
+        return -1;
     return 0;
 }

@@ -7,7 +7,7 @@
 void config_defaults(config *c)
 {
     memset(c, 0, sizeof *c);
-    c->mode = MODE_STANDARD;
+    c->mode = MODE_ADAPTIVE;
     c->io_backend = IO_BACKEND_SYNC;
     c->depth = 4;
     c->chunk_size = 8u << 20;
@@ -32,6 +32,8 @@ const char *mode_str(run_mode m)
         return "quick";
     case MODE_FULL:
         return "full";
+    case MODE_ADAPTIVE:
+        return "adaptive";
     default:
         return "standard";
     }
