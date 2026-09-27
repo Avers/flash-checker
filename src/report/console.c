@@ -15,8 +15,13 @@ static const char *short_desc(const run_ctx *c, verdict v, uint64_t mism)
 
     if (v == VERDICT_PASS)
         return "device appears genuine";
-    if (v == VERDICT_INCONCLUSIVE)
+    if (v == VERDICT_INCONCLUSIVE) {
+        if (c->cfg->mode == MODE_IDENTIFY)
+            return "identify only prints device info, no test was run";
+        if (c->tested_bytes == 0)
+            return "no data was written; re-run with --destructive";
         return "cannot certify, re-run with --mode full";
+    }
     if (first && first->unwritten_data) {
         static char buf[128];
         char a[64];
@@ -52,6 +57,12 @@ const char *report_evidence(const run_ctx *c, char *buf, size_t n)
 {
     const stage_report *first = NULL;
 
+    if (c->cfg->mode == MODE_IDENTIFY) {
+        snprintf(buf, n, "identify mode writes nothing: device information only, "
+                         "no test was performed");
+        return buf;
+    }
+
     for (size_t i = 0; i < c->nst; i++) {
         if (c->st[i].has_first_fail) {
             first = &c->st[i];
@@ -64,6 +75,10 @@ const char *report_evidence(const run_ctx *c, char *buf, size_t n)
                 snprintf(buf, n, "read/write errors during stage '%s'", c->st[i].name);
                 return buf;
             }
+        }
+        if (c->tested_bytes == 0) {
+            snprintf(buf, n, "no data was written to the device: nothing was tested");
+            return buf;
         }
         if (c->cfg->mode == MODE_QUICK) {
             char s[64];
@@ -184,6 +199,11 @@ void report_console(const run_ctx *c, verdict v)
     log_out("  I/O errors:          %llu", (unsigned long long)io_err);
     fmt_time(t, sizeof t, 0);
     log_out("");
+    if (c->cfg->mode == MODE_IDENTIFY) {
+        log_out("NOTE: identify mode performed no test (%s written).", b);
+        log_out("      re-run with --destructive --mode standard to verify capacity.");
+        return;
+    }
     log_out("RESULT: %s", verdict_str(v));
     log_out("  %s", report_evidence(c, ev, sizeof ev));
     print_short_result(c, v, mism);

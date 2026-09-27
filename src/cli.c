@@ -42,7 +42,8 @@ void cli_usage(FILE *f, const char *prog)
             "All tests write unique, reproducible data straight to the raw block device.\n"
             "\n"
             "modes:\n"
-            "  -i, --identify          only print device information, never writes\n"
+            "  -i, --identify          only print device information, never writes;\n"
+            "                         performs no test, reports no verdict, exits 0\n"
             "      --mode MODE         quick | standard | full   (default: standard)\n"
             "                         quick    cheap probe, never certifies capacity\n"
             "                         standard probe + retention + capacity search\n"
@@ -80,7 +81,8 @@ void cli_usage(FILE *f, const char *prog)
             "      --self-reported SIZE reported capacity of the simulated device\n"
             "      --self-real SIZE    real capacity of the simulated device\n"
             "\n"
-            "exit codes: 0 PASS, 1 FAIL, 2 INCONCLUSIVE, 3 usage/safety, 4 I/O error\n",
+            "exit codes: 0 PASS (or --identify), 1 FAIL, 2 INCONCLUSIVE, 3 usage/safety, "
+            "4 I/O error\n",
             prog);
 }
 

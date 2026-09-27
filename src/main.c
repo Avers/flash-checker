@@ -196,6 +196,8 @@ int main(int argc, char **argv)
     io->close(io);
     if (lock_fd >= 0)
         close(lock_fd);
+    if (cfg.mode == MODE_IDENTIFY)
+        return EXIT_OK;
     return v == VERDICT_PASS ? EXIT_OK
                              : (v == VERDICT_FAIL ? EXIT_FAIL : EXIT_INCONCLUSIVE);
 }

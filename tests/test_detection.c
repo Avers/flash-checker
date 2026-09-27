@@ -243,6 +243,41 @@ static void test_safety_mounted(void)
     CHECK(safety_is_mounted("/dev/definitely-not-a-device-xyz", detail, sizeof detail) == 0);
 }
 
+static void test_verdict(void)
+{
+    config cfg;
+    run_ctx ctx;
+
+    memset(&cfg, 0, sizeof cfg);
+    memset(&ctx, 0, sizeof ctx);
+    config_defaults(&cfg);
+    cfg.mode = MODE_IDENTIFY;
+    ctx.cfg = &cfg;
+    ctx.nst = 1;
+    ctx.st[0].name = "identify";
+
+    T_BEGIN("identify never reports a verdict");
+    CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
+
+    T_BEGIN("zero written bytes is never a pass");
+    cfg.mode = MODE_STANDARD;
+    CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
+
+    T_BEGIN("verified write passes");
+    ctx.tested_bytes = 1u << 20;
+    ctx.has_capacity = 1;
+    CHECK(run_verdict(&ctx) == VERDICT_PASS);
+
+    T_BEGIN("mismatch fails");
+    ctx.st[0].chunks_failed = 1;
+    CHECK(run_verdict(&ctx) == VERDICT_FAIL);
+
+    T_BEGIN("io errors are inconclusive");
+    ctx.st[0].chunks_failed = 0;
+    ctx.st[0].io_errors = 1;
+    CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
+}
+
 void test_io_and_detection(void)
 {
     test_io_fake_honest();
@@ -253,4 +288,5 @@ void test_io_and_detection(void)
     test_speed_track();
     test_checkpoint();
     test_safety_mounted();
+    test_verdict();
 }
