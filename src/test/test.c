@@ -71,6 +71,8 @@ verdict run_verdict(const run_ctx *c)
         return VERDICT_FAIL;
     if (io_err > 0)
         return VERDICT_INCONCLUSIVE;
+    if (c->tested_bytes == 0)
+        return VERDICT_INCONCLUSIVE;
     if (c->cfg->mode == MODE_QUICK)
         return VERDICT_INCONCLUSIVE;
     if (c->cfg->mode == MODE_STANDARD && !c->has_capacity)
