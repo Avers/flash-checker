@@ -155,6 +155,7 @@ sudo ./build/flashcheck /dev/disk8s1 --destructive --dry-run --yes
 | Root access | `sudo` required for raw block device access |
 | `O_DIRECT` | Not supported on macOS; auto-disabled |
 | Capacity detection | Uses macOS `DKIOCGETBLOCKCOUNT` ioctl |
+| Mount detection | `getfsstat()`; refuses to write while the disk or any of its partitions is mounted |
 | `diskutil` | Can be used to check device info before testing |
 
 ### Troubleshooting
