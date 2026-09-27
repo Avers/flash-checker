@@ -47,10 +47,12 @@ void cli_usage(FILE *f, const char *prog)
             "modes:\n"
             "  -i, --identify          only print device information, never writes;\n"
             "                         performs no test, reports no verdict, exits 0\n"
-            "      --mode MODE         quick | standard | full   (default: standard)\n"
-            "                         quick    cheap probe, never certifies capacity\n"
-            "                         standard probe + retention + capacity search\n"
-            "                         full     standard + full write/read verify\n"
+            "      --mode MODE         quick | standard | adaptive | full   (default: adaptive)\n"
+            "                         quick     benchmark + sparse probe; never certifies\n"
+            "                         standard  probe + retention + capacity search\n"
+            "                         adaptive  standard, then full write/read verify only\n"
+            "                                   when no counter-evidence was found\n"
+            "                         full      same stages as adaptive, explicit\n"
             "      --bench             measure device write/read speed; needs\n"
             "                         --destructive, prints no verdict (exit 1 if the\n"
             "                         read-back does not match)\n"
@@ -102,6 +104,8 @@ static int set_mode(const char *s, config *c)
         c->mode = MODE_STANDARD;
     else if (strcmp(s, "full") == 0)
         c->mode = MODE_FULL;
+    else if (strcmp(s, "adaptive") == 0)
+        c->mode = MODE_ADAPTIVE;
     else if (strcmp(s, "identify") == 0)
         c->mode = MODE_IDENTIFY;
     else

@@ -397,6 +397,95 @@ static void test_bench(void)
     io->close(io);
 }
 
+static int run_mode_case(config *cfg, device_info *dev, run_ctx *ctx, int policy,
+                         uint64_t reported, uint64_t real, uint64_t chunk)
+{
+    io_ops *io;
+    char err[128];
+    int e = 0;
+    int rc;
+
+    memset(ctx, 0, sizeof *ctx);
+    io = io_fake_open(reported, real, policy, &e);
+    if (io == NULL)
+        return -1;
+    ctx->cfg = cfg;
+    ctx->dev = dev;
+    ctx->io = io;
+    ctx->test_id = 0xfeed;
+    if (pipeline_init(&ctx->pl, io, chunk, PAT_CHACHA20, 0xfeedbeef, reported, 2, err,
+                      sizeof err) != 0) {
+        io->close(io);
+        return -1;
+    }
+    rc = run_execute(ctx);
+    pipeline_free(&ctx->pl);
+    io->close(io);
+    ctx->io = NULL;
+    return rc;
+}
+
+static void test_mode_gating(void)
+{
+    config cfg;
+    run_ctx ctx;
+    device_info dev;
+    uint64_t chunk = 1u << 20;
+    uint64_t reported = 16u << 20;
+
+    memset(&cfg, 0, sizeof cfg);
+    memset(&dev, 0, sizeof dev);
+    dev.capacity = reported;
+
+    T_BEGIN("default mode is adaptive");
+    config_defaults(&cfg);
+    CHECK(cfg.mode == MODE_ADAPTIVE);
+    CHECK(strcmp(mode_str(MODE_ADAPTIVE), "adaptive") == 0);
+    CHECK(strcmp(mode_str(MODE_STANDARD), "standard") == 0);
+    CHECK(strcmp(mode_str(MODE_QUICK), "quick") == 0);
+    CHECK(strcmp(mode_str(MODE_FULL), "full") == 0);
+
+    cfg.chunk_size = chunk;
+    cfg.bench_bytes = 2u << 20;
+
+    T_BEGIN("quick stops after the sparse probe and never certifies");
+    cfg.mode = MODE_QUICK;
+    CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_HONEST, reported, reported, chunk), 0);
+    CHECK_EQ_U64(ctx.nst, 3);
+    CHECK(strcmp(ctx.st[0].name, "identify") == 0);
+    CHECK(strcmp(ctx.st[1].name, "benchmark") == 0);
+    CHECK(strcmp(ctx.st[2].name, "sparse-probe") == 0);
+    CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
+
+    T_BEGIN("standard runs through the capacity search and passes an honest device");
+    cfg.mode = MODE_STANDARD;
+    CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_HONEST, reported, reported, chunk), 0);
+    CHECK_EQ_U64(ctx.nst, 5);
+    CHECK(strcmp(ctx.st[3].name, "retention") == 0);
+    CHECK(strcmp(ctx.st[4].name, "capacity-boundary") == 0);
+    CHECK(ctx.has_capacity == 1);
+    CHECK(run_verdict(&ctx) == VERDICT_PASS);
+
+    T_BEGIN("adaptive escalates to full verify on a clean device");
+    cfg.mode = MODE_ADAPTIVE;
+    CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_HONEST, reported, reported, chunk), 0);
+    CHECK_EQ_U64(ctx.nst, 6);
+    CHECK(strcmp(ctx.st[5].name, "full-verify") == 0);
+    CHECK(run_verdict(&ctx) == VERDICT_PASS);
+
+    T_BEGIN("quick fails fast on an aliasing device");
+    cfg.mode = MODE_QUICK;
+    CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_ALIAS, reported, reported / 4, chunk), 0);
+    CHECK_EQ_U64(ctx.nst, 3);
+    CHECK(run_verdict(&ctx) == VERDICT_FAIL);
+
+    T_BEGIN("adaptive stops at the first failure and never escalates");
+    cfg.mode = MODE_ADAPTIVE;
+    CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_ALIAS, reported, reported / 4, chunk), 0);
+    CHECK_EQ_U64(ctx.nst, 3);
+    CHECK(run_verdict(&ctx) == VERDICT_FAIL);
+}
+
 void test_io_and_detection(void)
 {
     test_io_fake_honest();
@@ -409,4 +498,5 @@ void test_io_and_detection(void)
     test_safety_mounted();
     test_verdict();
     test_bench();
+    test_mode_gating();
 }

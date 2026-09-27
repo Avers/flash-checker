@@ -8,7 +8,8 @@ typedef enum {
     MODE_IDENTIFY = 0,
     MODE_QUICK = 1,
     MODE_STANDARD = 2,
-    MODE_FULL = 3
+    MODE_FULL = 3,
+    MODE_ADAPTIVE = 4
 } run_mode;
 
 typedef enum {
