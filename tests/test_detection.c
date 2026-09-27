@@ -279,6 +279,85 @@ static void test_verdict(void)
     CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
 }
 
+static void test_bench(void)
+{
+    config cfg;
+    run_ctx ctx;
+    device_info dev;
+    io_ops *io;
+    char err[128];
+    int e = 0;
+    uint64_t chunk = 1u << 20;
+    uint64_t reported = 16u << 20;
+    int rc;
+
+    memset(&cfg, 0, sizeof cfg);
+    memset(&ctx, 0, sizeof ctx);
+    memset(&dev, 0, sizeof dev);
+    config_defaults(&cfg);
+    cfg.chunk_size = chunk;
+    cfg.bench_bytes = 4u << 20;
+    dev.capacity = reported;
+    ctx.cfg = &cfg;
+    ctx.dev = &dev;
+
+    T_BEGIN("bench measures write and read speed on an honest device");
+    io = io_fake_open(reported, reported, FAKE_HONEST, &e);
+    CHECK(io != NULL);
+    if (io == NULL)
+        return;
+    ctx.io = io;
+    CHECK_EQ_U64(pipeline_init(&ctx.pl, io, chunk, PAT_CHACHA20, 0xfeedbeef, reported, 2, err,
+                               sizeof err),
+                 0);
+    CHECK_EQ_U64(bench_run(&ctx), 0);
+    CHECK_EQ_U64(ctx.nst, 1);
+    CHECK_EQ_U64(ctx.st[0].bytes_written, 4u << 20);
+    CHECK_EQ_U64(ctx.st[0].bytes_verified, 4u << 20);
+    CHECK_EQ_U64(ctx.st[0].chunks_failed, 0);
+    CHECK(ctx.st[0].write_bps > 0);
+    CHECK(ctx.st[0].read_bps > 0);
+    CHECK_EQ_U64(ctx.tested_bytes, 4u << 20);
+    pipeline_free(&ctx.pl);
+    io->close(io);
+
+    T_BEGIN("bench fails when the read-back does not match");
+    memset(&ctx, 0, sizeof ctx);
+    ctx.cfg = &cfg;
+    ctx.dev = &dev;
+    cfg.bench_bytes = reported;
+    io = io_fake_open(reported, reported / 4, FAKE_ALIAS, &e);
+    CHECK(io != NULL);
+    if (io == NULL)
+        return;
+    ctx.io = io;
+    CHECK_EQ_U64(pipeline_init(&ctx.pl, io, chunk, PAT_CHACHA20, 0xfeedbeef, reported, 2, err,
+                               sizeof err),
+                 0);
+    rc = bench_run(&ctx);
+    CHECK(rc == 1);
+    CHECK(ctx.st[0].chunks_failed > 0);
+    pipeline_free(&ctx.pl);
+    io->close(io);
+
+    T_BEGIN("bench reports I/O errors from the device");
+    memset(&ctx, 0, sizeof ctx);
+    ctx.cfg = &cfg;
+    ctx.dev = &dev;
+    io = io_fake_open(reported, reported / 4, FAKE_ERROR, &e);
+    CHECK(io != NULL);
+    if (io == NULL)
+        return;
+    ctx.io = io;
+    CHECK_EQ_U64(pipeline_init(&ctx.pl, io, chunk, PAT_CHACHA20, 0xfeedbeef, reported, 2, err,
+                               sizeof err),
+                 0);
+    CHECK(bench_run(&ctx) == -1);
+    CHECK(ctx.st[0].io_errors > 0);
+    pipeline_free(&ctx.pl);
+    io->close(io);
+}
+
 void test_io_and_detection(void)
 {
     test_io_fake_honest();
@@ -290,4 +369,5 @@ void test_io_and_detection(void)
     test_checkpoint();
     test_safety_mounted();
     test_verdict();
+    test_bench();
 }

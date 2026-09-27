@@ -225,3 +225,45 @@ void report_console(const run_ctx *c, verdict v)
         log_out("  This is not proof of authenticity; re-run with --mode full to certify.");
     }
 }
+
+void report_bench(const run_ctx *c)
+{
+    char a[64], b[64];
+    uint64_t mism = 0, io_err = 0;
+
+    for (size_t i = 0; i < c->nst; i++)
+        print_stage(&c->st[i], c->pl.chunk);
+
+    log_out("");
+    log_out("Summary:");
+    fmt_size(a, sizeof a, c->dev->capacity);
+    log_out("  reported capacity:   %s", a);
+    fmt_size(b, sizeof b, c->tested_bytes);
+    log_out("  data written:        %s", b);
+    for (size_t i = 0; i < c->nst; i++) {
+        io_err += c->st[i].io_errors;
+        mism += c->st[i].chunks_failed;
+    }
+    log_out("  mismatched regions:  %llu", (unsigned long long)mism);
+    log_out("  I/O errors:          %llu", (unsigned long long)io_err);
+    {
+        uint64_t gen_ns = 0, io_ns = 0;
+        char g1[64], i1[64];
+
+        pipeline_timing(&c->pl, &gen_ns, &io_ns);
+        if (gen_ns > 0 || io_ns > 0) {
+            fmt_time(g1, sizeof g1, (double)gen_ns / 1e9);
+            fmt_time(i1, sizeof i1, (double)io_ns / 1e9);
+            log_out("  data generation:     %s", g1);
+            log_out("  device I/O:          %s", i1);
+        }
+    }
+    log_out("");
+    log_out("NOTE: benchmark only, no authenticity verdict was produced.");
+    if (io_err > 0)
+        log_out("      I/O errors occurred: the measured rates may be unreliable.");
+    else if (mism > 0)
+        log_out("      read-back did not match: the device returned corrupted data.");
+    else
+        log_out("      every byte written in the benchmark range read back as written.");
+}

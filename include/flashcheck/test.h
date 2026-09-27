@@ -70,6 +70,7 @@ int stage_full(run_ctx *c, stage_report *r);
 int stage_boundary(run_ctx *c, stage_report *r);
 
 int run_execute(run_ctx *c);
+int bench_run(run_ctx *c);
 verdict run_verdict(const run_ctx *c);
 
 #endif
