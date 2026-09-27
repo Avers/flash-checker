@@ -113,11 +113,10 @@ wait-on-`cv_done` instead of spin (and `release` now broadcasts).
 
 ### Known Issues Found Along the Way
 
-1. **`make asan` does not sanitize (pre-existing)**: target-specific `CFLAGS`
-   do not reach the recursive `$(MAKE) test` sub-make, so the recipe compiles
-   with plain `-O2 -g` (verified: 0 asan symbols in the binary). Sanitizer runs
-   above were done with an explicit `CFLAGS=` override. Needs a Makefile fix
-   (developer approval required).
+1. ~~**`make asan` does not sanitize**~~ — **fixed in `8b99116` (PR #2)**: the
+   recursive `$(MAKE) test` now receives `CFLAGS="$(CFLAGS)"` explicitly.
+   Re-verified on macOS: `make asan` exits 0, test binary carries 1625
+   asan/ubsan symbols and links `libclang_rt.asan_osx_dynamic.dylib`.
 
 ---
 
@@ -163,10 +162,9 @@ wait-on-`cv_done` instead of spin (and `release` now broadcasts).
 
 | Priority | Task | Phase | Effort |
 |----------|------|-------|--------|
-| 1 | Fix `make asan` flag propagation (Makefile) | — | Low |
-| 2 | io_uring SQE/CQE batching (submit-and-wait per op) | P3 | Medium |
-| 3 | Batched release: `CHANGELOG.md` + `VERSION` bump | — | Low |
-| 4 | Real-hardware `--io-backend=uring` vs `sync` comparison | P3 | Low |
+| 1 | io_uring SQE/CQE batching (submit-and-wait per op) | P3 | Medium |
+| 2 | Batched release: `CHANGELOG.md` + `VERSION` bump | — | Low |
+| 3 | Real-hardware `--io-backend=uring` vs `sync` comparison | P3 | Low |
 
 Landed this session: bench subcommand (PR #3), macOS/Linux mount detection
 (PR #4), mount-refusal ordering (PR #5), stage speed stats (PR #6),
