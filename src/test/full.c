@@ -37,6 +37,8 @@ int stage_full(run_ctx *c, stage_report *r)
         uint64_t o;
 
         for (o = off; o < wend; o += c->pl.chunk) {
+            if (o + c->pl.chunk < wend)
+                pipeline_prefetch(&c->pl, o + c->pl.chunk, 1);
             if (pipeline_write(&c->pl, o, 1, &st) != 0)
                 goto io_error;
             speed_mark(&w, st.bytes_written);
@@ -44,6 +46,8 @@ int stage_full(run_ctx *c, stage_report *r)
         if (c->io->flush(c->io) != 0)
             goto io_error;
         for (o = off; o < wend; o += c->pl.chunk) {
+            if (o + c->pl.chunk < wend)
+                pipeline_prefetch(&c->pl, o + c->pl.chunk, 1);
             if (pipeline_verify(&c->pl, o, 1, &st) != 0) {
                 failed = 1;
                 break;

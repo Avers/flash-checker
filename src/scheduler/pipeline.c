@@ -3,11 +3,15 @@
 #include "flashcheck/util.h"
 
 int pipeline_init(pipeline *p, io_ops *io, uint64_t chunk, pattern_kind kind, uint64_t test_id,
-                  uint64_t capacity, char *err, size_t errn)
+                  uint64_t capacity, int depth, char *err, size_t errn)
 {
     memset(p, 0, sizeof *p);
     if (chunk < FC_ALIGN || chunk % FC_ALIGN != 0) {
         snprintf(err, errn, "chunk size must be a multiple of %d bytes", FC_ALIGN);
+        return -1;
+    }
+    if (depth < 0 || depth > GEN_POOL_MAX_DEPTH) {
+        snprintf(err, errn, "depth must be between 0 and %d", GEN_POOL_MAX_DEPTH);
         return -1;
     }
     p->io = io;
@@ -15,14 +19,19 @@ int pipeline_init(pipeline *p, io_ops *io, uint64_t chunk, pattern_kind kind, ui
     p->capacity = capacity;
     p->kind = kind;
     p->test_id = test_id;
-    p->exp = xalloc_aligned(FC_ALIGN, (size_t)chunk);
     p->got = xalloc_aligned(FC_ALIGN, (size_t)chunk);
+    p->pool = gen_pool_create(kind, test_id, chunk, capacity, depth);
+    if (p->pool == NULL) {
+        free(p->got);
+        snprintf(err, errn, "cannot create generator pool");
+        return -1;
+    }
     return 0;
 }
 
 void pipeline_free(pipeline *p)
 {
-    free(p->exp);
+    gen_pool_destroy(p->pool);
     free(p->got);
     memset(p, 0, sizeof *p);
 }
@@ -42,14 +51,28 @@ static pattern_id id_for(const pipeline *p, uint64_t off, uint32_t pass)
     return id;
 }
 
+void pipeline_prefetch(pipeline *p, uint64_t off, uint32_t pass)
+{
+    if (off >= p->capacity)
+        return;
+    gen_pool_prefetch(p->pool, off, pass);
+}
+
+void pipeline_timing(const pipeline *p, uint64_t *gen_ns, uint64_t *io_ns)
+{
+    *gen_ns = gen_pool_gen_ns(p->pool);
+    *io_ns = p->io_ns;
+}
+
 int pipeline_write(pipeline *p, uint64_t off, uint32_t pass, stage_stats *st)
 {
-    pattern_id id = id_for(p, off, pass);
     size_t len = pipeline_len(p, off);
-    int r;
+    uint8_t *exp = gen_pool_take(p->pool, off, pass);
+    uint64_t t0 = now_ns();
+    int r = p->io->write(p->io, exp, off, len);
 
-    pattern_fill(p->kind, p->exp, len, &id, 0);
-    r = p->io->write(p->io, p->exp, off, len);
+    p->io_ns += now_ns() - t0;
+    gen_pool_release(p->pool, exp);
     if (r < 0) {
         st->io_errors++;
         return r;
@@ -63,20 +86,24 @@ int pipeline_verify(pipeline *p, uint64_t off, uint32_t pass, stage_stats *st)
 {
     pattern_id id = id_for(p, off, pass);
     size_t len = pipeline_len(p, off);
+    uint8_t *exp = gen_pool_take(p->pool, off, pass);
     size_t bad;
-    int r;
+    uint64_t t0 = now_ns();
+    int r = p->io->read(p->io, p->got, off, len);
 
-    r = p->io->read(p->io, p->got, off, len);
+    p->io_ns += now_ns() - t0;
     if (r < 0) {
+        gen_pool_release(p->pool, exp);
         st->io_errors++;
         return r;
     }
     st->chunks_verified++;
     st->bytes_verified += len;
-    pattern_fill(p->kind, p->exp, len, &id, 0);
-    bad = first_diff(p->exp, p->got, len);
-    if (bad == len)
+    bad = first_diff(exp, p->got, len);
+    if (bad == len) {
+        gen_pool_release(p->pool, exp);
         return 0;
+    }
 
     st->chunks_failed++;
     st->bad_bytes += len - bad;
@@ -104,6 +131,7 @@ int pipeline_verify(pipeline *p, uint64_t off, uint32_t pass, stage_stats *st)
             st->unwritten_data = 1;
         }
     }
+    gen_pool_release(p->pool, exp);
     return 1;
 }
 
@@ -120,6 +148,8 @@ int pipeline_window_pass(pipeline *p, uint64_t start, uint64_t end, uint64_t win
         uint64_t w;
 
         for (w = off; w < wend; w += p->chunk) {
+            if (w + p->chunk < wend)
+                pipeline_prefetch(p, w + p->chunk, pass);
             if (pipeline_write(p, w, pass, st) != 0)
                 return -1;
         }
@@ -128,6 +158,8 @@ int pipeline_window_pass(pipeline *p, uint64_t start, uint64_t end, uint64_t win
             return -1;
         }
         for (w = off; w < wend; w += p->chunk) {
+            if (w + p->chunk < wend)
+                pipeline_prefetch(p, w + p->chunk, pass);
             if (pipeline_verify(p, w, pass, st) != 0) {
                 failed = 1;
                 if (stop_on_fail)
@@ -146,6 +178,8 @@ int pipeline_verify_offsets(pipeline *p, const uint64_t *offs, size_t n, uint32_
     int failed = 0;
 
     for (size_t i = 0; i < n; i++) {
+        if (i + 1 < n)
+            pipeline_prefetch(p, offs[i + 1], pass);
         if (pipeline_verify(p, offs[i], pass, st) != 0) {
             failed = 1;
             if (stop_on_fail)

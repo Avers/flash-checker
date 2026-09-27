@@ -163,8 +163,8 @@ int main(int argc, char **argv)
         }
     }
 
-    if (pipeline_init(&ctx.pl, io, cfg.chunk_size, cfg.pattern, ctx.test_id, dev.capacity, err,
-                      sizeof err) != 0) {
+    if (pipeline_init(&ctx.pl, io, cfg.chunk_size, cfg.pattern, ctx.test_id, dev.capacity,
+                      cfg.depth, err, sizeof err) != 0) {
         log_err("%s", err);
         return EXIT_USAGE;
     }

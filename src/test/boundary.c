@@ -26,6 +26,8 @@ static int probe_ok(bound_ctx *b, uint64_t x)
         return 0;
     }
     for (uint64_t o = 0; o < x; o += b->c->pl.chunk) {
+        if (o + b->c->pl.chunk < x)
+            pipeline_prefetch(&b->c->pl, o + b->c->pl.chunk, 9001);
         if (pipeline_write(&b->c->pl, o, 9001, &st) != 0) {
             b->st.io_errors++;
             return 0;

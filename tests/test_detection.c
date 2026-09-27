@@ -78,7 +78,8 @@ typedef struct {
     int failed;
 } expect_t;
 
-static void run_case(const char *name, int policy, uint64_t reported, uint64_t real, int want_fail)
+static void run_case(const char *name, int policy, uint64_t reported, uint64_t real, int want_fail,
+                     int depth)
 {
     io_ops *io;
     pipeline p;
@@ -95,7 +96,7 @@ static void run_case(const char *name, int policy, uint64_t reported, uint64_t r
     CHECK(io != NULL);
     if (io == NULL)
         return;
-    CHECK_EQ_U64(pipeline_init(&p, io, chunk, PAT_CHACHA20, 0xfeedbeef, reported, err,
+    CHECK_EQ_U64(pipeline_init(&p, io, chunk, PAT_CHACHA20, 0xfeedbeef, reported, depth, err,
                                sizeof err),
                  0);
 
@@ -120,10 +121,10 @@ static void run_case(const char *name, int policy, uint64_t reported, uint64_t r
 static void test_detection(void)
 {
     printf("detection against simulated devices\n");
-    run_case("honest device passes full verify", FAKE_HONEST, 16u << 20, 16u << 20, 0);
-    run_case("alias device fails full verify", FAKE_ALIAS, 16u << 20, 4u << 20, 1);
-    run_case("stale device fails full verify", FAKE_STALE, 16u << 20, 4u << 20, 1);
-    run_case("unwritten device fails verify", FAKE_UNWRITTEN, 16u << 20, 4u << 20, 1);
+    run_case("honest device passes full verify", FAKE_HONEST, 16u << 20, 16u << 20, 0, 0);
+    run_case("alias device fails full verify", FAKE_ALIAS, 16u << 20, 4u << 20, 1, 4);
+    run_case("stale device fails full verify", FAKE_STALE, 16u << 20, 4u << 20, 1, 0);
+    run_case("unwritten device fails verify", FAKE_UNWRITTEN, 16u << 20, 4u << 20, 1, 4);
 }
 
 static void test_alias_attribution(void)
@@ -138,7 +139,7 @@ static void test_alias_attribution(void)
 
     T_BEGIN("alias source is identified");
     io = io_fake_open(16u << 20, 4u << 20, FAKE_ALIAS, &e);
-    pipeline_init(&p, io, chunk, PAT_CHACHA20, 99, 16u << 20, err, sizeof err);
+    pipeline_init(&p, io, chunk, PAT_CHACHA20, 99, 16u << 20, 0, err, sizeof err);
     stage_stats_reset(&st);
     pipeline_write(&p, src, 1, &st);
     io->flush(io);
@@ -162,7 +163,7 @@ static void test_window_pass(void)
 
     T_BEGIN("window pass writes then verifies");
     io = io_fake_open(16u << 20, 16u << 20, FAKE_HONEST, &e);
-    pipeline_init(&p, io, chunk, PAT_CHACHA20, 5, 16u << 20, err, sizeof err);
+    pipeline_init(&p, io, chunk, PAT_CHACHA20, 5, 16u << 20, 4, err, sizeof err);
     stage_stats_reset(&st);
     CHECK_EQ_U64(pipeline_window_pass(&p, 0, 8u << 20, 2, 1, &st, 1), 0);
     CHECK_EQ_U64(st.chunks_written, 8);
@@ -172,7 +173,7 @@ static void test_window_pass(void)
     T_BEGIN("window pass stops at first failure");
     io->close(io);
     io = io_fake_open(16u << 20, 5u << 20, FAKE_ALIAS, &e);
-    pipeline_init(&p, io, chunk, PAT_CHACHA20, 5, 16u << 20, err, sizeof err);
+    pipeline_init(&p, io, chunk, PAT_CHACHA20, 5, 16u << 20, 4, err, sizeof err);
     stage_stats_reset(&st);
     CHECK(pipeline_window_pass(&p, 0, 16u << 20, 8, 1, &st, 1) > 0);
     CHECK(st.chunks_failed > 0);

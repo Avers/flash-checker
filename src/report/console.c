@@ -182,6 +182,18 @@ void report_console(const run_ctx *c, verdict v)
     }
     log_out("  mismatched regions:  %llu", (unsigned long long)mism);
     log_out("  I/O errors:          %llu", (unsigned long long)io_err);
+    {
+        uint64_t gen_ns = 0, io_ns = 0;
+        char g1[64], i1[64];
+
+        pipeline_timing(&c->pl, &gen_ns, &io_ns);
+        if (gen_ns > 0 || io_ns > 0) {
+            fmt_time(g1, sizeof g1, (double)gen_ns / 1e9);
+            fmt_time(i1, sizeof i1, (double)io_ns / 1e9);
+            log_out("  data generation:     %s", g1);
+            log_out("  device I/O:          %s", i1);
+        }
+    }
     fmt_time(t, sizeof t, 0);
     log_out("");
     log_out("RESULT: %s", verdict_str(v));

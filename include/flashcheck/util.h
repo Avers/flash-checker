@@ -23,6 +23,7 @@ void fmt_rate(char *buf, size_t n, double bytes_per_sec);
 void fmt_time(char *buf, size_t n, double seconds);
 double now_sec(void);
 uint64_t now_ms(void);
+uint64_t now_ns(void);
 void sleep_ms(unsigned ms);
 size_t first_diff(const void *a, const void *b, size_t len);
 int read_file(const char *path, char *buf, size_t n);

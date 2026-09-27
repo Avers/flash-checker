@@ -44,6 +44,8 @@ int stage_retention(run_ctx *c, stage_report *r)
         for (off = start; off < fill_end; off += c->pl.chunk) {
             int is_anchor = 0;
 
+            if (off + c->pl.chunk < fill_end)
+                pipeline_prefetch(&c->pl, off + c->pl.chunk, (uint32_t)(pass + 1000));
             for (uint64_t i = 0; i < n_anchors; i++) {
                 if (anchors[i] == off) {
                     is_anchor = 1;

@@ -1,4 +1,4 @@
-# Session Status — io_uring Backend (Correctness, Tests, O_DIRECT)
+# Session Status — io_uring Backend (Correctness, Tests, O_DIRECT) & Read-Path Parallelization
 
 ## Correction to the Original io_uring Report
 
@@ -69,21 +69,73 @@ past `device_probe()` — cannot be exercised without a real `/dev/...` target
 
 ---
 
+## Round 3 — Read-Path Parallelization (branch `ai/read-path-parallel`)
+
+### What Was Built
+
+Expected-data generation now overlaps blocking I/O via a generator pool with
+one helper thread (Phase 3 plan item "read-path parallelization").
+
+| File | Change |
+|------|--------|
+| `src/scheduler/pool.c` (new) | N-slot buffer pool (slots: FREE/FILLING/READY/BUSY), one worker thread, `gen_pool_prefetch/take/release`; inline-fill fallback when the worker is not ahead; `gen_ns` accumulated atomically. Depth 0/1 ⇒ no thread, single slot |
+| `src/scheduler/pipeline.c` | `pipeline_write`/`pipeline_verify` take expected buffers from the pool; new `pipeline_prefetch()` and `pipeline_timing()`; `pipeline_init` gains a `depth` param (validated 0..16) |
+| `src/test/{full,benchmark,retention,boundary}.c` | prefetch-next before each write/verify so `pattern_fill` runs while the previous `pread`/`pwrite` blocks |
+| `src/cli.c`, `src/config.c` | `--depth N` (default 4), validated in `config_validate`, documented in `--help` |
+| `src/report/console.c` | Summary prints `data generation:` / `device I/O:` split |
+| `Makefile` | `-pthread` in `ALLCFLAGS` (covers compile + link; developer-approved) |
+| `tests/test_pool.c` (new) | 16 checks: pool bytes == `pattern_fill` reference, inline fallback, depth 0, parallel ≡ sequential stats, alias detection with threads, out-of-order prefetch, timing > 0 |
+| `tests/test_detection.c` | `run_case` takes a depth; honest/stale use 0, alias/unwritten use 4; window-pass cases use 4 |
+
+Prefetch call sites: `pipeline_window_pass` (write + verify loops),
+`pipeline_verify_offsets`, `stage_full`, `stage_benchmark`, `stage_retention`
+fill, `stage_boundary` fill. Sparse/anchor loops are too short to benefit and
+still use the inline path.
+
+### Bug Found and Fixed During Development
+
+`find_locked(g, SLOT_READY, 0, 0)` was used to mean "any READY slot", but the
+function also filters `off == 0 && pass == 0`. Slot eviction therefore only
+ever saw READY slots at offset 0 → worker pick failures → a
+`pthread_cond_broadcast` livelock that starved the main thread and hung the
+retention stage. Fixed with a separate `find_state_locked()` plus
+wait-on-`cv_done` instead of spin (and `release` now broadcasts).
+
+### Verification (all green)
+
+| Command | Result |
+|---------|--------|
+| `make clean && make` | ✅ no warnings under `-Werror` |
+| `make test` | ✅ **196 checks, 0 failures** (193 → 196) + CLI smoke |
+| `CFLAGS="-fsanitize=address,undefined" make test` | ✅ sanitizer-clean |
+| `CFLAGS="-fsanitize=thread" make test` | ✅ **no data races** |
+| `--self-test=honest` 256 MiB, `--depth 0` vs default 4 | ✅ 5.4 s → 4.2 s wall (**~23 % faster**), CPU 113 %, both PASS |
+
+### Known Issues Found Along the Way
+
+1. **`make asan` does not sanitize (pre-existing)**: target-specific `CFLAGS`
+   do not reach the recursive `$(MAKE) test` sub-make, so the recipe compiles
+   with plain `-O2 -g` (verified: 0 asan symbols in the binary). Sanitizer runs
+   above were done with an explicit `CFLAGS=` override. Needs a Makefile fix
+   (developer approval required).
+
+---
+
 ## Current Project Status
 
 ### Phase Completion
 - **Phase 0 (Research)**: ✅ Complete (design.md, IMPLEMENTATION_PLAN.md)
 - **Phase 1 (Skeleton + v0.1)**: ✅ Complete
 - **Phase 2 (Patterns, Sparse, Retention, Boundary)**: ✅ Complete
-- **Phase 3 (Performance)**: 🟡 io_uring backend correct, tested and O_DIRECT-aware; read-path parallelization pending
+- **Phase 3 (Performance)**: 🟡 io_uring backend correct/tested/O_DIRECT-aware; read-path parallelization done (generator pool, `--depth`); bench subcommand + uring batching still open
 - **Phase 4 (Reporting/Resume/Orchestration)**: ✅ Mostly complete
 
 ### What's Next (Priority Order)
 
 | Priority | Task | Phase | Effort |
 |----------|------|-------|--------|
-| 1 | Read-path parallelization (overlap generator/CPU with I/O) | P3 | Medium |
-| 2 | Bench subcommand for generator vs device throughput | P3 | Low |
+| 1 | Bench subcommand for generator vs device throughput | P3 | Low |
+| 2 | Fix `make asan` flag propagation (Makefile) | — | Low |
 | 3 | macOS safety improvements (diskutil/IOKit mount detection) | P4 | Medium |
 | 4 | Adaptive orchestration enhancements (auto-escalate) | P4 | Low |
 
@@ -109,6 +161,10 @@ past `device_probe()` — cannot be exercised without a real `/dev/...` target
 ---
 
 ## Commits
+
+```
+feat(pipeline): parallelize read path with a generator pool and helper thread
+```
 
 ```
 4f3c88c fix(io): correct io_uring opcodes and ring offsets, add functional test
