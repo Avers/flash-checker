@@ -82,6 +82,10 @@ int main(int argc, char **argv)
         log_err("--dry-run only makes sense together with --destructive");
         return EXIT_USAGE;
     }
+    if (action == CLI_ACTION_BENCH && !cfg.destructive) {
+        log_err("--bench measures device write/read speed and requires --destructive");
+        return EXIT_USAGE;
+    }
 
     fc_install_signal_handlers();
 
@@ -170,12 +174,21 @@ int main(int argc, char **argv)
     }
     ctx.pipeline_ready = 1;
 
-    rc = run_execute(&ctx);
+    if (action == CLI_ACTION_BENCH)
+        rc = bench_run(&ctx);
+    else
+        rc = run_execute(&ctx);
     v = run_verdict(&ctx);
 
-    report_console(&ctx, v);
-    if (cfg.json_path != NULL)
-        report_json(&ctx, v, cfg.json_path);
+    if (action == CLI_ACTION_BENCH) {
+        report_bench(&ctx);
+        if (cfg.json_path != NULL)
+            log_warn("--json is not supported with --bench, ignoring it");
+    } else {
+        report_console(&ctx, v);
+        if (cfg.json_path != NULL)
+            report_json(&ctx, v, cfg.json_path);
+    }
 
     if (fc_interrupted) {
         log_warn("interrupted by signal: progress checkpoint written if --checkpoint was used");
@@ -196,6 +209,8 @@ int main(int argc, char **argv)
     io->close(io);
     if (lock_fd >= 0)
         close(lock_fd);
+    if (action == CLI_ACTION_BENCH)
+        return rc == 1 ? EXIT_FAIL : EXIT_OK;
     if (cfg.mode == MODE_IDENTIFY)
         return EXIT_OK;
     return v == VERDICT_PASS ? EXIT_OK

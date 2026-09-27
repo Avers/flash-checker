@@ -31,6 +31,7 @@ enum {
     OPT_SELF_REAL,
     OPT_IO_BACKEND,
     OPT_DEPTH,
+    OPT_BENCH_RUN,
     OPT_HELP,
     OPT_VERSION
 };
@@ -50,6 +51,9 @@ void cli_usage(FILE *f, const char *prog)
             "                         quick    cheap probe, never certifies capacity\n"
             "                         standard probe + retention + capacity search\n"
             "                         full     standard + full write/read verify\n"
+            "      --bench             measure device write/read speed; needs\n"
+            "                         --destructive, prints no verdict (exit 1 if the\n"
+            "                         read-back does not match)\n"
             "\n"
             "safety:\n"
             "  -d, --destructive       allow writes (destroys all data on the device)\n"
@@ -127,6 +131,7 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
 {
     static const struct option opts[] = {
         { "identify", no_argument, NULL, 'i' },
+        { "bench", no_argument, NULL, OPT_BENCH_RUN },
         { "mode", required_argument, NULL, OPT_MODE },
         { "destructive", no_argument, NULL, 'd' },
         { "block-size", required_argument, NULL, 'b' },
@@ -163,6 +168,9 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
         switch (ch) {
         case 'i':
             c->mode = MODE_IDENTIFY;
+            break;
+        case OPT_BENCH_RUN:
+            *action = CLI_ACTION_BENCH;
             break;
         case OPT_MODE:
             if (parse_mode_arg(optarg, c) != 0) {
@@ -304,5 +312,9 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
     }
     if (c->self_test >= 0 && !c->destructive)
         c->destructive = 1;
+    if (*action == CLI_ACTION_BENCH && c->mode == MODE_IDENTIFY) {
+        snprintf(err, errn, "--bench and --identify cannot be combined");
+        return CLI_ERROR;
+    }
     return CLI_OK;
 }
