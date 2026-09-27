@@ -5,6 +5,7 @@
 int stage_retention(run_ctx *c, stage_report *r)
 {
     stage_stats st;
+    speed_track w, rd;
     uint64_t start = ctx_start(c);
     uint64_t end = ctx_end(c);
     uint64_t anchors[16];
@@ -14,8 +15,12 @@ int stage_retention(run_ctx *c, stage_report *r)
     char sz[64];
 
     stage_stats_reset(&st);
+    speed_init(&w);
+    speed_init(&rd);
     n_anchors = pipeline_probes(start, end, c->pl.chunk, 8, anchors, 16);
     if (n_anchors == 0 || end <= start) {
+        speed_free(&w);
+        speed_free(&rd);
         snprintf(r->note, sizeof r->note, "skipped: empty range");
         return 0;
     }
@@ -33,12 +38,17 @@ int stage_retention(run_ctx *c, stage_report *r)
             if (pipeline_write(&c->pl, anchors[off], p, &st) != 0) {
                 r->io_errors = st.io_errors;
                 snprintf(r->note, sizeof r->note, "I/O error writing anchor");
+                speed_free(&w);
+                speed_free(&rd);
                 return -1;
             }
+            speed_mark(&w, st.bytes_written);
         }
         if (c->io->flush(c->io) != 0) {
             r->io_errors = ++st.io_errors;
             snprintf(r->note, sizeof r->note, "flush failed");
+            speed_free(&w);
+            speed_free(&rd);
             return -1;
         }
         for (off = start; off < fill_end; off += c->pl.chunk) {
@@ -57,18 +67,25 @@ int stage_retention(run_ctx *c, stage_report *r)
             if (pipeline_write(&c->pl, off, (uint32_t)(pass + 1000), &st) != 0) {
                 r->io_errors = st.io_errors;
                 snprintf(r->note, sizeof r->note, "I/O error during fill");
+                speed_free(&w);
+                speed_free(&rd);
                 return -1;
             }
+            speed_mark(&w, st.bytes_written);
             stage_progress("fill", st.bytes_written, (fill_end - start) * c->cfg->passes,
-                           0);
+                           w.total_bytes / FC_MAX(w.last_ms - w.start_ms, 1) * 1000.0);
         }
         if (c->io->flush(c->io) != 0) {
             r->io_errors = ++st.io_errors;
+            speed_free(&w);
+            speed_free(&rd);
             return -1;
         }
         if (pipeline_verify_offsets(&c->pl, anchors, (size_t)n_anchors, p, &st, 1) > 0)
             failed = 1;
+        speed_mark(&rd, st.bytes_verified);
     }
+    stage_fill_speed(r, &w, &rd);
     r->bytes_written = st.bytes_written;
     r->bytes_verified = st.bytes_verified;
     r->regions_written = st.chunks_written;
@@ -85,6 +102,8 @@ int stage_retention(run_ctx *c, stage_report *r)
     r->stale_data = st.stale_data;
     r->unwritten_data = st.unwritten_data;
     c->tested_bytes += st.bytes_written;
+    speed_free(&w);
+    speed_free(&rd);
     if (failed)
         snprintf(r->note, sizeof r->note, "previously written data did not survive");
     return 0;

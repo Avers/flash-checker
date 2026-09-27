@@ -5,6 +5,8 @@
 typedef struct {
     run_ctx *c;
     stage_stats st;
+    speed_track w;
+    speed_track rd;
     int verdict_ok;
 } bound_ctx;
 
@@ -56,6 +58,8 @@ static int probe_ok(bound_ctx *b, uint64_t x)
             b->st.unwritten_data = st.unwritten_data;
         }
     }
+    speed_mark(&b->w, b->st.bytes_written);
+    speed_mark(&b->rd, b->st.bytes_verified);
     return ok;
 }
 
@@ -78,6 +82,8 @@ int stage_boundary(run_ctx *c, stage_report *r)
         snprintf(r->note, sizeof r->note, "skipped: range too small for boundary search");
         return 0;
     }
+    speed_init(&b.w);
+    speed_init(&b.rd);
 
     log_out("");
     log_out("Stage: reliable capacity search (budget %s, resolution %s)",
@@ -127,6 +133,7 @@ int stage_boundary(run_ctx *c, stage_report *r)
 
     r->bytes_written = b.st.bytes_written;
     r->bytes_verified = b.st.bytes_verified;
+    stage_fill_speed(r, &b.w, &b.rd);
     r->regions_written = b.st.chunks_written;
     r->regions_verified = b.st.chunks_verified;
     r->chunks_failed = b.st.chunks_failed;
@@ -140,6 +147,8 @@ int stage_boundary(run_ctx *c, stage_report *r)
     r->stale_data = b.st.stale_data;
     r->unwritten_data = b.st.unwritten_data;
     c->tested_bytes += b.st.bytes_written;
+    speed_free(&b.w);
+    speed_free(&b.rd);
     r->reliable_capacity = lo;
     r->has_capacity = 1;
     snprintf(r->note, sizeof r->note, "reliable capacity >= %s (%s spent of budget)",
