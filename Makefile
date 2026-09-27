@@ -3,7 +3,7 @@ CFLAGS  ?= -O2 -g
 WARN     = -Wall -Wextra -Werror -Wshadow -Wpointer-arith -Wcast-qual -Wno-unused-parameter
 DEFS     = -D_GNU_SOURCE -DFILE_OFFSET_BITS=64 -DVERSION_STR=\"$(VERSION)\"
 INC      = -Iinclude
-ALLCFLAGS = -std=c11 $(WARN) $(DEFS) $(INC) $(CFLAGS)
+ALLCFLAGS = -std=c11 $(WARN) $(DEFS) $(INC) $(CFLAGS) -pthread
 
 SRCDIRS  = src src/device src/io src/crypto src/pattern src/test src/scheduler src/stats src/report
 
@@ -56,7 +56,7 @@ debug: clean $(BIN) $(TESTBIN)
 
 asan: CFLAGS = -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
 asan: clean
-	@$(MAKE) --no-print-directory test
+	@$(MAKE) --no-print-directory test CFLAGS="$(CFLAGS)"
 
 lint:
 	@command -v clang-tidy >/dev/null 2>&1 && clang-tidy --version || echo "clang-tidy not installed; relying on -Werror build"

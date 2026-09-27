@@ -25,6 +25,7 @@ typedef struct {
     int verbose;
     int want_direct;
     io_backend io_backend;
+    int depth;
     uint64_t chunk_size;
     uint64_t window_size;
     uint64_t limit;

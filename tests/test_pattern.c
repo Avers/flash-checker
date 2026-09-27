@@ -114,7 +114,7 @@ static void test_chunk_math(void)
     T_BEGIN("pipeline tail chunk length");
     io = io_fake_open(cap, cap, FAKE_HONEST, &ie);
     CHECK(io != NULL);
-    CHECK_EQ_U64(pipeline_init(&p, io, chunk, PAT_CHACHA20, 1, cap, err, sizeof err), 0);
+    CHECK_EQ_U64(pipeline_init(&p, io, chunk, PAT_CHACHA20, 1, cap, 0, err, sizeof err), 0);
     CHECK_EQ_U64(pipeline_len(&p, 0), chunk);
     CHECK_EQ_U64(pipeline_len(&p, chunk * 4), 1234);
     pipeline_free(&p);

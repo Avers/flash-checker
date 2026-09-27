@@ -29,6 +29,8 @@ int stage_benchmark(run_ctx *c, stage_report *r)
     }
 
     for (off = start; off < bend; off += c->pl.chunk) {
+        if (off + c->pl.chunk < bend)
+            pipeline_prefetch(&c->pl, off + c->pl.chunk, 0);
         if (pipeline_write(&c->pl, off, 0, &st) != 0)
             goto io_error;
         speed_mark(&w, st.bytes_written);
@@ -39,6 +41,8 @@ int stage_benchmark(run_ctx *c, stage_report *r)
         goto io_error;
 
     for (off = start; off < bend; off += c->pl.chunk) {
+        if (off + c->pl.chunk < bend)
+            pipeline_prefetch(&c->pl, off + c->pl.chunk, 0);
         if (pipeline_verify(&c->pl, off, 0, &st) != 0 && st.io_errors > 0)
             goto io_error;
         speed_mark(&rd, st.bytes_verified);

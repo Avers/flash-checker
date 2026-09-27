@@ -3,6 +3,7 @@
 #include <getopt.h>
 
 #include "flashcheck/io.h"
+#include "flashcheck/pool.h"
 #include "flashcheck/util.h"
 
 enum {
@@ -29,6 +30,7 @@ enum {
     OPT_SELF_REPORTED,
     OPT_SELF_REAL,
     OPT_IO_BACKEND,
+    OPT_DEPTH,
     OPT_HELP,
     OPT_VERSION
 };
@@ -61,6 +63,8 @@ void cli_usage(FILE *f, const char *prog)
             "      --offset SIZE       start testing at SIZE\n"
             "  -p, --passes N          retention passes, default 1\n"
             "      --pattern KIND      chacha20 | prng | zero, default chacha20\n"
+            "      --depth N           parallel data-generation depth 0-16, default 4\n"
+            "                          (0 or 1 generates data inline, no helper thread)\n"
             "      --bench-bytes SIZE  bytes used for the speed benchmark, default 256MiB\n"
             "      --boundary-budget SIZE   max bytes for the capacity search, default 8GiB\n"
             "      --boundary-resolution SIZE  bisection step, default 64MiB\n"
@@ -131,6 +135,7 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
         { "offset", required_argument, NULL, OPT_OFFSET },
         { "passes", required_argument, NULL, 'p' },
         { "pattern", required_argument, NULL, OPT_PATTERN },
+        { "depth", required_argument, NULL, OPT_DEPTH },
         { "bench-bytes", required_argument, NULL, OPT_BENCH },
         { "boundary-budget", required_argument, NULL, OPT_BOUNDARY_BUDGET },
         { "boundary-resolution", required_argument, NULL, OPT_BOUNDARY_RES },
@@ -196,6 +201,16 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
                 return CLI_ERROR;
             }
             break;
+        case OPT_DEPTH: {
+            uint64_t v;
+            if (parse_u64(optarg, &v) != 0 || v > GEN_POOL_MAX_DEPTH) {
+                snprintf(err, errn, "invalid --depth: '%s' (0..%d)", optarg,
+                         GEN_POOL_MAX_DEPTH);
+                return CLI_ERROR;
+            }
+            c->depth = (int)v;
+            break;
+        }
         case OPT_BENCH:
             if (set_size_opt(optarg, "--bench-bytes", &c->bench_bytes, err, errn) != 0)
                 return CLI_ERROR;

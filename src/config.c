@@ -1,6 +1,7 @@
 #include "flashcheck/config.h"
 
 #include "flashcheck/io.h"
+#include "flashcheck/pool.h"
 #include "flashcheck/util.h"
 
 void config_defaults(config *c)
@@ -8,6 +9,7 @@ void config_defaults(config *c)
     memset(c, 0, sizeof *c);
     c->mode = MODE_STANDARD;
     c->io_backend = IO_BACKEND_SYNC;
+    c->depth = 4;
     c->chunk_size = 8u << 20;
     c->window_size = 1ULL << 30;
     c->passes = 1;
@@ -63,6 +65,10 @@ int config_validate(config *c, char *err, size_t errn)
     }
     if (c->mode != MODE_IDENTIFY && c->mode != MODE_FULL && c->bench_bytes == 0) {
         snprintf(err, errn, "--bench-bytes must be > 0");
+        return -1;
+    }
+    if (c->depth < 0 || c->depth > GEN_POOL_MAX_DEPTH) {
+        snprintf(err, errn, "--depth must be between 0 and %d", GEN_POOL_MAX_DEPTH);
         return -1;
     }
     return 0;
