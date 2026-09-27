@@ -5,6 +5,7 @@
 int stage_sparse(run_ctx *c, stage_report *r)
 {
     stage_stats st;
+    speed_track w, rd;
     uint64_t start = ctx_start(c);
     uint64_t end = ctx_end(c);
     uint64_t probes[64];
@@ -13,8 +14,12 @@ int stage_sparse(run_ctx *c, stage_report *r)
     char a[64], b[64];
 
     stage_stats_reset(&st);
+    speed_init(&w);
+    speed_init(&rd);
     n = pipeline_probes(start, end, c->pl.chunk, 48, probes, 64);
     if (n == 0) {
+        speed_free(&w);
+        speed_free(&rd);
         snprintf(r->note, sizeof r->note, "skipped: empty range");
         return 0;
     }
@@ -27,16 +32,25 @@ int stage_sparse(run_ctx *c, stage_report *r)
         if (pipeline_write(&c->pl, probes[i], 0, &st) != 0) {
             r->io_errors = st.io_errors;
             snprintf(r->note, sizeof r->note, "I/O error writing probe");
+            speed_free(&w);
+            speed_free(&rd);
             return -1;
         }
+        speed_mark(&w, st.bytes_written);
     }
     if (c->io->flush(c->io) != 0) {
         r->io_errors = ++st.io_errors;
         snprintf(r->note, sizeof r->note, "flush failed");
+        speed_free(&w);
+        speed_free(&rd);
         return -1;
     }
+    speed_free(&rd);
+    speed_init(&rd);
     failed = pipeline_verify_offsets(&c->pl, probes, (size_t)n, 0, &st, 0);
+    speed_mark(&rd, st.bytes_verified);
 
+    stage_fill_speed(r, &w, &rd);
     r->bytes_written = st.bytes_written;
     r->bytes_verified = st.bytes_verified;
     r->regions_written = st.chunks_written;
@@ -53,6 +67,8 @@ int stage_sparse(run_ctx *c, stage_report *r)
     r->stale_data = st.stale_data;
     r->unwritten_data = st.unwritten_data;
     c->tested_bytes += st.bytes_written;
+    speed_free(&w);
+    speed_free(&rd);
     if (failed)
         snprintf(r->note, sizeof r->note, "regions do not hold unique data");
     return 0;
