@@ -56,7 +56,7 @@ debug: clean $(BIN) $(TESTBIN)
 
 asan: CFLAGS = -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
 asan: clean
-	@$(MAKE) --no-print-directory test
+	@$(MAKE) --no-print-directory test CFLAGS="$(CFLAGS)"
 
 lint:
 	@command -v clang-tidy >/dev/null 2>&1 && clang-tidy --version || echo "clang-tidy not installed; relying on -Werror build"
