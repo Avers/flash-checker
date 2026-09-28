@@ -4,6 +4,7 @@ void test_crypto(void);
 void test_pattern_and_math(void);
 void test_io_and_detection(void);
 void test_uring(void);
+void test_sync(void);
 void test_pool(void);
 
 int main(void)
@@ -13,6 +14,7 @@ int main(void)
     test_pattern_and_math();
     test_io_and_detection();
     test_uring();
+    test_sync();
     test_pool();
     return test_summary();
 }
