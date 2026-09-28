@@ -204,13 +204,86 @@ pipeline.
 
 ---
 
+## Round 6 — Real-Hardware Session: fake 1 TB stick, three bugs found
+
+### Setup
+
+Developer-granted access to `/dev/sdc`: generic "Mass Storage Device", serial
+`121220160204`, USB 2.0 (480 Mb/s), **claims 1000.00 GiB**, no filesystem,
+unmounted, not swapped. Root came from a temporary `/etc/sudoers.d/flashcheck`
+listing only exact device-pinned command lines (removed at the end of the
+session); every destructive run was approved before it ran.
+
+Preflight: `--identify` (0 B written) → `--destructive --dry-run --yes`
+(plan printed, 0 B written) → destructive runs.
+
+### Detection result
+
+| Run | Result |
+|-----|--------|
+| `--mode quick --io-backend sync` | **FAIL**, first failure **4.00 GiB**, 7/24 regions differ, "region at 4.00 GiB was never written" |
+| `--mode quick --io-backend uring` | **FAIL**, byte-identical stage stats — same verdict, same offsets |
+
+Real capacity ≈ **4 GiB** of a claimed 1000 GiB (0.4 %). This closes two
+long-standing follow-ups: the `--io-backend=uring` CLI path on a real block
+device, and the real-hardware `uring` vs `sync` comparison.
+
+### Backend comparison (`--bench --bench-bytes 512MiB`, USB 2.0)
+
+| Backend | O_DIRECT | Write | Read |
+|---------|----------|-------|------|
+| sync | yes | 9.15 MiB/s | 5.89 MiB/s |
+| sync | buffered | 210.70 MiB/s | 8.39 MiB/s |
+| uring | yes | 9.26 MiB/s | 5.60 MiB/s |
+| uring | buffered | 263.51 MiB/s | 8.40 MiB/s |
+
+Buffered writes are page-cache speed, not device speed; the O_DIRECT rows are
+the device numbers. **uring matches sync within noise — no regression from the
+SQE/CQE batching.**
+
+### Bugs found and fixed
+
+| # | Symptom | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | `--no-direct`: exit 4, 1 I/O error, **0 bytes written** (sync only, uring fine) | `src/io/sync.c:73,82` chose `s->fd_buf` whenever `can_direct()` was false, but `fd_buf == -1` when `want_direct == 0` → `pwrite(-1, …)` → EBADF | new `pick_fd()`: use the companion fd only when it exists — mirrors `uring.c:315` |
+| 2 | Spurious `another flashcheck instance …` (exit 3) on any run started <2 s after the previous one | `(udev-worker)` takes a **shared** flock on the device inode while re-probing; `LOCK_EX\|LOCK_NB` failed instantly, with no retry and no errno in the message | `safety_lock_device()` retries for ~2 s (10 × 200 ms), preserves `errno`, and `main.c` now prints it |
+| 3 | 32-byte leak per `io_sync_open` (LSan caught it the moment the sync backend had a test) | `sync_close()` freed `s` but never `s->ops.stats`; `fake.c:148` and `uring.c:563` both do | `free(s->ops.stats)` before `free(s)` |
+
+New `tests/test_sync.c` (+13 checks): opens the sync backend with
+`want_direct=0`, round trip, unaligned offset, flush, past-EOF read.
+Reverting fix 1 makes it fail with `EBADF` (`-9`) — verified, so the regression
+test really guards the bug.
+
+### Verification (all green)
+
+| Command | Result |
+|---------|--------|
+| `make clean && make FLASHCHECK_IO_URING=1` | ✅ no warnings under `-Werror` |
+| `./build/flashcheck-tests` | ✅ **562 checks, 0 failures** (549 → 562) |
+| `make test` | ✅ 562 checks + CLI smoke green |
+| ASAN+UBSAN+LSan (`-O0`) | ✅ clean, 562 checks, no leaks |
+| TSan (`-O0`) | ✅ 562 checks, **0 data races** |
+| Hardware: 5 back-to-back `--dry-run` | ✅ 5/5 exit 0 (was 1/5 before fix 2) |
+| Hardware: `--bench --no-direct` (sync) | ✅ exit 0, 0 I/O errors (was exit 4 before fix 1) |
+
+### Follow-ups from this round
+
+1. `--identify` prints `serial: 1.00` — that is the SCSI *revision* field; the
+   real serial (`121220160204`, from INQUIRY/udev) is not shown.
+   `src/device/device.c` is a protected file — needs approval.
+2. With `want_direct=1` on a filesystem that rejects `O_DIRECT`, sync reports
+   `direct_active = 1` although the fd actually used is buffered. Harmless for
+   I/O, wrong in the JSON report.
+
+---
+
 ## Current Project Status
 
 ### Phase Completion
 - **Phase 0 (Research)**: ✅ Complete (design.md, IMPLEMENTATION_PLAN.md)
 - **Phase 1 (Skeleton + v0.1)**: ✅ Complete
 - **Phase 2 (Patterns, Sparse, Retention, Boundary)**: ✅ Complete
-- **Phase 3 (Performance)**: 🟡 io_uring backend correct/tested/O_DIRECT-aware; read-path parallelization done (generator pool, `--depth`); bench subcommand done (PR #3); **SQE/CQE batching done (Round 5, awaiting commit approval)**
+- **Phase 3 (Performance)**: 🟡 io_uring backend correct/tested/O_DIRECT-aware; read-path parallelization done (generator pool, `--depth`); bench subcommand done (PR #3); SQE/CQE batching landed (PR #9); **real-hardware validation done (Round 6) — uring == sync on a fake 1 TB stick, three bugs fixed**
 - **Phase 4 (Reporting/Resume/Orchestration)**: ✅ Complete (adaptive orchestration landed in PR #7)
 
 ### What's Next (Priority Order)
@@ -218,26 +291,26 @@ pipeline.
 | Priority | Task | Phase | Effort |
 |----------|------|-------|--------|
 | 1 | Batched release: `CHANGELOG.md` + `VERSION` bump | — | Low |
-| 2 | Real-hardware `--io-backend=uring` vs `sync` comparison | P3 | Low |
-| 3 | Fix `make asan` on gcc 16 (`src/util.c:29` null format string at `-O1`) | — | Low |
+| 2 | Fix `make asan` on gcc 16 (`src/util.c:29` null format string at `-O1`) | — | Low |
+| 3 | `--identify` should report the real serial, not the SCSI revision (`device.c`) | — | Low |
 
 Landed this session: bench subcommand (PR #3), macOS/Linux mount detection
 (PR #4), mount-refusal ordering (PR #5), stage speed stats (PR #6),
-adaptive default (PR #7), io_uring SQE/CQE batching (Round 5, uncommitted).
+adaptive default (PR #7), io_uring SQE/CQE batching (PR #9), CI smoke fix
+(PR #10), real-hardware session + three fixes (Round 6).
 
 ### Known Follow-ups (io_uring)
 
-1. ~~Single SQE/CQE, submit-and-wait per op~~ — batching landed in Round 5.
-2. Real-hardware comparison of `--io-backend=uring` vs `sync` still outstanding.
-3. Exercise the `--io-backend=uring` CLI path (and its warning) on a real block
-   device — needs developer approval.
+1. ~~Single SQE/CQE, submit-and-wait per op~~ — batching landed in Round 5 (PR #9).
+2. ~~Real-hardware comparison of `--io-backend=uring` vs `sync`~~ — done in Round 6 (within noise of sync).
+3. ~~Exercise the `--io-backend=uring` CLI path on a real block device~~ — done in Round 6 (identical verdict to sync).
 
 ---
 
 ## Notes for Linux Testing
 
 1. Build with `make FLASHCHECK_IO_URING=1`
-2. Compare `--io-backend=uring` vs `--io-backend=sync` performance
+2. Compare `--io-backend=uring` vs `--io-backend=sync` performance ~~— done, Round 6~~
 3. io_uring requires kernel 5.1+ (`IORING_OP_READ`/`WRITE` need 5.6+)
 4. Test with USB 2.0/3.0 flash drives to verify no regression
 5. **Never trust `--self-test` as backend coverage — it always uses the fake device**

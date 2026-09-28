@@ -155,7 +155,8 @@ int main(int argc, char **argv)
             return EXIT_IOERROR;
         }
         if (safety_lock_device(lock_fd) != 0) {
-            log_err("another %s instance seems to be running on %s", FC_PROG, dev.path);
+            log_err("another %s instance seems to be running on %s (%s)", FC_PROG, dev.path,
+                    errno_str(errno));
             return EXIT_USAGE;
         }
         if (cfg.dry_run) {

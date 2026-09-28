@@ -1,6 +1,7 @@
 #include "flashcheck/safety.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <sys/file.h>
@@ -167,11 +168,24 @@ int safety_is_mounted(const char *path, char *detail, size_t dn)
 
 int safety_lock_device(int fd)
 {
+    unsigned i;
+
     if (fd < 0)
         return -1;
-    if (flock(fd, LOCK_EX | LOCK_NB) != 0)
-        return -1;
-    return 0;
+    /* udev re-probes a device right after it is written and holds a shared
+       flock for a moment; a plain LOCK_NB would fail spuriously then. */
+    for (i = 0; i < 10; i++) {
+        int e;
+
+        if (flock(fd, LOCK_EX | LOCK_NB) == 0)
+            return 0;
+        e = errno;
+        if (e != EWOULDBLOCK && e != EAGAIN)
+            return -1;
+        sleep_ms(200u);
+        errno = e;
+    }
+    return -1;
 }
 
 void safety_plan(const config *c, const device_info *d)

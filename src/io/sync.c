@@ -67,10 +67,17 @@ static int can_direct(io_sync *s, uint64_t off, size_t len)
     return 1;
 }
 
+static int pick_fd(io_sync *s, uint64_t off, size_t len)
+{
+    if (s->fd_buf >= 0 && !can_direct(s, off, len))
+        return s->fd_buf;
+    return s->fd;
+}
+
 static int sync_read(io_ops *o, void *buf, uint64_t off, size_t len)
 {
     io_sync *s = (io_sync *)o;
-    int r = loop_xfer(can_direct(s, off, len) ? s->fd : s->fd_buf, buf, off, len, 0);
+    int r = loop_xfer(pick_fd(s, off, len), buf, off, len, 0);
     if (r < 0)
         o->stats->io_errors++;
     return r;
@@ -79,8 +86,7 @@ static int sync_read(io_ops *o, void *buf, uint64_t off, size_t len)
 static int sync_write(io_ops *o, const void *buf, uint64_t off, size_t len)
 {
     io_sync *s = (io_sync *)o;
-    int r = loop_xfer(can_direct(s, off, len) ? s->fd : s->fd_buf, (void *)(uintptr_t)buf,
-                      off, len, 1);
+    int r = loop_xfer(pick_fd(s, off, len), (void *)(uintptr_t)buf, off, len, 1);
     if (r < 0)
         o->stats->io_errors++;
     return r;
@@ -106,6 +112,7 @@ static void sync_close(io_ops *o)
         close(s->fd);
     if (s->fd_buf >= 0 && s->fd_buf != s->fd)
         close(s->fd_buf);
+    free(s->ops.stats);
     free(s);
 }
 
