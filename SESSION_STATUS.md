@@ -277,33 +277,74 @@ test really guards the bug.
 
 ---
 
+## Round 7 — Release v0.2.0 and the Round 6 follow-ups (PRs #12–#15)
+
+### What Landed
+
+| PR | Commit | Change |
+|----|--------|--------|
+| #12 | `9c4c4d8` | **v0.2.0** — `CHANGELOG.md` + `VERSION` (MINOR: new features). The entry covers every non-merge commit since 0.1.1 (`4f3c88c..0868ead`) |
+| #13 | `9ac49ad` | `make asan` on gcc 16: `-O1 -fsanitize=undefined` raised a layout-dependent `null format string [-Werror=format-overflow=]` at `src/util.c:29`; `vlog()` now guards the format |
+| #14 | `279ba3b` | `--identify` reported the SCSI revision as `serial` (`1.00`), the upstream **hub** as `usb` (`8087:0024`, product `n/a`) and `transport: unknown`. `device.c`: try `device/serial` first, keep `device/rev` in a new `rev` field, `find_usb()` stops at the nearest `idVendor` node (ancestors are hubs) and takes its `serial`; `transport` set to `usb` |
+| #15 | `2215861` | sync no longer reports `direct_active = 1` when the `O_DIRECT` open failed — mirrors `uring.c`; regression test on `/dev/null` (rejects `O_DIRECT` with `EINVAL`) |
+
+### Round 6 follow-ups — all closed
+
+| Follow-up | Resolution |
+|-----------|------------|
+| `--identify` prints the SCSI revision as serial | PR #14 — real serial `121220160204`, `rev` reported separately |
+| sync `direct_active = 1` lie when `O_DIRECT` is unsupported | PR #15 — `direct_active` reflects the fd actually used |
+| `make asan` cannot compile on gcc 16 | PR #13 — `make asan` and `make asan FLASHCHECK_IO_URING=1` both exit 0 |
+| Batched release (`CHANGELOG.md` + `VERSION`) | PR #12 — **v0.2.0** |
+
+### Verification (all green)
+
+| Command | Result |
+|---------|--------|
+| `make clean && make FLASHCHECK_IO_URING=1` | ✅ no warnings under `-Werror` |
+| `./build/flashcheck --version` | ✅ `flashcheck 0.2.0` |
+| `make FLASHCHECK_IO_URING=1 test` | ✅ **566 checks, 0 failures** (549 → 566) + CLI smoke |
+| `make asan` / `make asan FLASHCHECK_IO_URING=1` | ✅ RC=0, 566 checks, 0 ASan reports |
+| `--identify /dev/sdc` (read-only) | ✅ `serial: 121220160204`, `usb: 14cd:1212 Mass Storage Device`, `rev: 1.00`, `transport: usb` |
+| new test vs old `sync.c` | ✅ fails (`direct_active == 0: 1 != 0`) — guards the regression |
+
+Environment: gcc 16.2, kernel `7.1.5+kali-amd64`, `/dev/sdc` = fake 1 TB stick
+(4 GiB real). CI green on `main` after every merge.
+
+---
+
 ## Current Project Status
 
 ### Phase Completion
 - **Phase 0 (Research)**: ✅ Complete (design.md, IMPLEMENTATION_PLAN.md)
 - **Phase 1 (Skeleton + v0.1)**: ✅ Complete
 - **Phase 2 (Patterns, Sparse, Retention, Boundary)**: ✅ Complete
-- **Phase 3 (Performance)**: 🟡 io_uring backend correct/tested/O_DIRECT-aware; read-path parallelization done (generator pool, `--depth`); bench subcommand done (PR #3); SQE/CQE batching landed (PR #9); **real-hardware validation done (Round 6) — uring == sync on a fake 1 TB stick, three bugs fixed**
+- **Phase 3 (Performance)**: 🟡 io_uring backend correct/tested/O_DIRECT-aware; read-path parallelization done (generator pool, `--depth`); bench subcommand done (PR #3); SQE/CQE batching landed (PR #9); **real-hardware validation done (Round 6) — uring == sync on a fake 1 TB stick, three bugs fixed**; v0.2.0 released (PR #12); `make asan` fixed on gcc 16 (PR #13); `--identify` reports the real serial/USB ids (PR #14); sync `direct_active` is honest (PR #15)
 - **Phase 4 (Reporting/Resume/Orchestration)**: ✅ Complete (adaptive orchestration landed in PR #7)
 
 ### What's Next (Priority Order)
 
 | Priority | Task | Phase | Effort |
 |----------|------|-------|--------|
-| 1 | Batched release: `CHANGELOG.md` + `VERSION` bump | — | Low |
-| 2 | Fix `make asan` on gcc 16 (`src/util.c:29` null format string at `-O1`) | — | Low |
-| 3 | `--identify` should report the real serial, not the SCSI revision (`device.c`) | — | Low |
+| 1 | Tag and push `v0.2.0` (`git tag -a v0.2.0 && git push origin v0.2.0`) | — | Low |
+| 2 | Remove the temporary `/etc/sudoers.d/flashcheck` (developer action) | — | Low |
+| 3 | Read-ahead window is invalidated by `pipeline_write` only — a `--resume` run verifying ranges written by an earlier run starts with an empty window (correct today; worth a test) | Phase 3 | Low |
 
 Landed this session: bench subcommand (PR #3), macOS/Linux mount detection
 (PR #4), mount-refusal ordering (PR #5), stage speed stats (PR #6),
 adaptive default (PR #7), io_uring SQE/CQE batching (PR #9), CI smoke fix
-(PR #10), real-hardware session + three fixes (Round 6).
+(PR #10), real-hardware session + three fixes (Round 6), v0.2.0 release
+(PR #12), `make asan` gcc-16 fix (PR #13), `--identify` real serial (PR #14),
+sync `direct_active` honesty (PR #15).
 
 ### Known Follow-ups (io_uring)
 
 1. ~~Single SQE/CQE, submit-and-wait per op~~ — batching landed in Round 5 (PR #9).
 2. ~~Real-hardware comparison of `--io-backend=uring` vs `sync`~~ — done in Round 6 (within noise of sync).
 3. ~~Exercise the `--io-backend=uring` CLI path on a real block device~~ — done in Round 6 (identical verdict to sync).
+4. ~~`make asan` cannot compile on gcc 16~~ — fixed in Round 7 (PR #13).
+5. ~~`--identify` reported the SCSI revision as serial~~ — fixed in Round 7 (PR #14).
+6. ~~sync reported `direct_active = 1` when `O_DIRECT` was unsupported~~ — fixed in Round 7 (PR #15).
 
 ---
 
@@ -341,3 +382,42 @@ feat(io): honour --direct in the io_uring backend, warn when uring is unavailabl
 - Verified: make, FLASHCHECK_IO_URING=1, make test and make asan in both
   variants; 193 checks, 0 failures (was 176)
 ```
+
+```
+9c4c4d8 release: bump version to 0.2.0 and document PRs #1-#11
+```
+
+```
+9ac49ad fix(build): make `make asan` compile on gcc 16
+```
+
+- `-O1 -fsanitize=undefined` raised a layout-dependent
+  `null format string [-Werror=format-overflow=]` at `src/util.c:29`;
+  `vlog()` now guards the format (`fmt != NULL ? fmt : ""`)
+- `make asan` and `make asan FLASHCHECK_IO_URING=1` both exit 0,
+  566 checks, 0 failures, no sanitizer reports
+
+```
+279ba3b fix(device): report the real serial, USB ids and transport in --identify
+```
+
+- `device/../serial` does not exist on this device, so the code fell back
+  to `device/rev` and stored the revision in the serial field
+- `find_usb()` kept walking past the device node: the ancestor hub
+  (1-1, 8087:0024) overwrote the device's vid/pid (14cd:1212) and cleared
+  usb_product, which the hub lacks
+- `transport` read `driver`, a symlink to a directory (EISDIR) → unknown
+- now: `device/serial` first, `device/rev` in a new `rev` field,
+  `find_usb()` stops at the nearest `idVendor` node and takes its serial
+
+```
+2215861 fix(io): stop reporting O_DIRECT active when it is not
+```
+
+- `direct_active = want_direct && fd_buf >= 0` stayed 1 when the O_DIRECT
+  open failed, so `--direct` on a rejecting filesystem reported
+  `O_DIRECT active` while every transfer was buffered
+- mirrors `uring.c`: `direct_active = 1` only when the O_DIRECT open
+  succeeded; I/O behaviour unchanged
+- regression test on `/dev/null` (rejects O_DIRECT with EINVAL) fails
+  (`1 != 0`) when the fix is reverted
