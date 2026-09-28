@@ -35,7 +35,7 @@ static int probe_ok(bound_ctx *b, uint64_t x)
             return 0;
         }
     }
-    if (b->c->io->flush(b->c->io) != 0) {
+    if (pipeline_flush(&b->c->pl, &st) != 0) {
         b->st.io_errors++;
         return 0;
     }

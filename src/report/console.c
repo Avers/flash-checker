@@ -222,7 +222,20 @@ void report_console(const run_ctx *c, verdict v)
     if (v == VERDICT_PASS) {
         log_out("  The device returned every byte written to it, over the tested range.");
     } else if (v == VERDICT_INCONCLUSIVE) {
-        log_out("  This is not proof of authenticity; re-run with --mode full to certify.");
+        if (c->dev != NULL && (ctx_start(c) != 0 || ctx_end(c) < c->dev->capacity))
+            log_out("  Only part of the claim was tested; re-run without --limit/--offset to "
+                    "certify.");
+        else
+            log_out("  This is not proof of authenticity; re-run with --mode full to certify.");
+    }
+    if (c->dev != NULL && (ctx_start(c) != 0 || ctx_end(c) < c->dev->capacity)) {
+        char rs[64], re[64], rc[64];
+
+        fmt_size(rs, sizeof rs, ctx_start(c));
+        fmt_size(re, sizeof re, ctx_end(c));
+        fmt_size(rc, sizeof rc, c->dev->capacity);
+        log_out("  Tested range %s..%s of %s reported; the claim was not fully probed.",
+                rs, re, rc);
     }
 }
 

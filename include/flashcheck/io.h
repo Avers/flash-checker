@@ -13,9 +13,18 @@ typedef struct {
     uint64_t io_errors;
 } io_stats;
 
+typedef struct {
+    void *buf;
+    uint64_t off;
+    size_t len;
+    int res;
+} io_seg;
+
 struct io_ops {
     int (*read)(io_ops *o, void *buf, uint64_t off, size_t len);
     int (*write)(io_ops *o, const void *buf, uint64_t off, size_t len);
+    int (*readv)(io_ops *o, io_seg *segs, size_t n);
+    int (*writev)(io_ops *o, io_seg *segs, size_t n);
     int (*flush)(io_ops *o);
     void (*close)(io_ops *o);
     io_stats *stats;

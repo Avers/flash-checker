@@ -39,7 +39,7 @@ int bench_run(run_ctx *c)
         stage_progress("write", st.bytes_written, bend - start,
                        w.total_bytes / FC_MAX(w.last_ms - w.start_ms, 1) * 1000.0);
     }
-    if (c->io->flush(c->io) != 0)
+    if (pipeline_flush(&c->pl, &st) != 0)
         goto io_error;
 
     for (off = start; off < bend; off += c->pl.chunk) {
