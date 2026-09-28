@@ -36,10 +36,10 @@ jobs:
           echo "== CLI smoke =="
           ./build/flashcheck --version
           ./build/flashcheck --help >/dev/null
-          ./build/flashcheck --self-test=alias --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 1
-          ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 0
-          ./build/flashcheck --self-test=stale --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 1
-          ./build/flashcheck --self-test=error --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 4
+          rc=0; ./build/flashcheck --self-test=alias --self-reported=256MiB --self-real=128MiB --yes || rc=$?; test "$rc" -eq 1
+          rc=0; ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=256MiB --yes || rc=$?; test "$rc" -eq 0
+          rc=0; ./build/flashcheck --self-test=stale --self-reported=256MiB --self-real=128MiB --yes || rc=$?; test "$rc" -eq 1
+          rc=0; ./build/flashcheck --self-test=error --self-reported=256MiB --self-real=128MiB --yes || rc=$?; test "$rc" -eq 4
           echo "== all CLI smoke tests passed =="
 
       - name: Build (debug)
@@ -52,7 +52,7 @@ jobs:
         if: matrix.build-type == 'debug'
         run: |
           ./build/flashcheck-tests
-          ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 0
+          rc=0; ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=256MiB --yes || rc=$?; test "$rc" -eq 0
 
       - name: Build (asan)
         if: matrix.build-type == 'asan'
@@ -64,7 +64,7 @@ jobs:
         if: matrix.build-type == 'asan'
         run: |
           ./build/flashcheck-tests
-          ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 0
+          rc=0; ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=256MiB --yes || rc=$?; test "$rc" -eq 0
 
       - name: Lint
         run: |
@@ -72,7 +72,7 @@ jobs:
 
       - name: Self-test smoke
         run: |
-          ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB --yes
-          ./build/flashcheck --self-test=alias --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 1
-          ./build/flashcheck --self-test=stale --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 1
-          ./build/flashcheck --self-test=error --self-reported=256MiB --self-real=128MiB --yes; test $? -eq 4
+          rc=0; ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=256MiB --yes || rc=$?; test "$rc" -eq 0
+          rc=0; ./build/flashcheck --self-test=alias --self-reported=256MiB --self-real=128MiB --yes || rc=$?; test "$rc" -eq 1
+          rc=0; ./build/flashcheck --self-test=stale --self-reported=256MiB --self-real=128MiB --yes || rc=$?; test "$rc" -eq 1
+          rc=0; ./build/flashcheck --self-test=error --self-reported=256MiB --self-real=128MiB --yes || rc=$?; test "$rc" -eq 4
