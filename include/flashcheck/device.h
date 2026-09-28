@@ -16,6 +16,7 @@ typedef struct {
     char vendor[DEV_STR];
     char model[DEV_STR];
     char serial[DEV_STR];
+    char rev[DEV_STR];
     char usb_vidpid[32];
     char usb_product[DEV_STR];
     char transport[64];

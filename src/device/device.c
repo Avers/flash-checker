@@ -75,6 +75,13 @@ static void find_usb(const char *name, device_info *d)
             snprintf(p, sizeof p, "%s/product", cur);
             if (read_file(p, d->usb_product, sizeof d->usb_product) != 0)
                 d->usb_product[0] = '\0';
+            snprintf(p, sizeof p, "%s/serial", cur);
+            if (d->serial[0] == '\0')
+                read_file(p, d->serial, sizeof d->serial);
+            if (d->transport[0] == '\0')
+                snprintf(d->transport, sizeof d->transport, "usb");
+            /* this is the nearest device node; anything above it is a hub */
+            break;
         }
         snprintf(p, sizeof p, "%s/driver", cur);
         if (read_file(p, v, sizeof v) == 0 && v[0] != '\0' && d->transport[0] == '\0')
@@ -171,9 +178,10 @@ int device_probe(const char *path, device_info *d, char *err, size_t errn)
     read_sysfs_str(d->name, "device/model", "device/model", d->model, sizeof d->model);
     if (d->model[0] == '\0')
         read_sysfs_str(d->name, "device/name", NULL, d->model, sizeof d->model);
-    read_sysfs_str(d->name, "device/../serial", NULL, d->serial, sizeof d->serial);
+    read_sysfs_str(d->name, "device/serial", NULL, d->serial, sizeof d->serial);
     if (d->serial[0] == '\0')
-        read_sysfs_str(d->name, "device/rev", NULL, d->serial, sizeof d->serial);
+        read_sysfs_str(d->name, "device/../serial", NULL, d->serial, sizeof d->serial);
+    read_sysfs_str(d->name, "device/rev", NULL, d->rev, sizeof d->rev);
     find_usb(d->name, d);
     if (d->transport[0] == '\0')
         snprintf(d->transport, sizeof d->transport, "unknown");
@@ -199,6 +207,8 @@ void device_print_info(const device_info *d)
         log_out("  model:          %s %s", na(d->vendor), na(d->model));
     if (d->serial[0] != '\0')
         log_out("  serial:         %s", d->serial);
+    if (d->rev[0] != '\0')
+        log_out("  rev:            %s", d->rev);
     log_out("  reported size:  %s (%llu bytes)", cap, (unsigned long long)d->capacity);
     log_out("  logical block:  %s", sec);
     log_out("  transport:      %s", na(d->transport));
@@ -219,6 +229,7 @@ void device_json(const device_info *d, void *ctx, int indent)
     fprintf(o, "%*s  \"vendor\": \"%s\",\n", indent, "", na(d->vendor));
     fprintf(o, "%*s  \"model\": \"%s\",\n", indent, "", na(d->model));
     fprintf(o, "%*s  \"serial\": \"%s\",\n", indent, "", na(d->serial));
+    fprintf(o, "%*s  \"rev\": \"%s\",\n", indent, "", na(d->rev));
     fprintf(o, "%*s  \"transport\": \"%s\",\n", indent, "", na(d->transport));
     fprintf(o, "%*s  \"removable\": %d,\n", indent, "", d->removable);
     fprintf(o, "%*s  \"logical_block_size\": %u,\n", indent, "", d->logical_sector);
