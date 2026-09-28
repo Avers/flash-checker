@@ -109,6 +109,32 @@ static int fake_write(io_ops *o, const void *buf, uint64_t off, size_t len)
     return 0;
 }
 
+static int fake_readv(io_ops *o, io_seg *segs, size_t n)
+{
+    size_t i;
+    int failed = 0;
+
+    for (i = 0; i < n; i++) {
+        segs[i].res = fake_read(o, segs[i].buf, segs[i].off, segs[i].len);
+        if (segs[i].res < 0)
+            failed = 1;
+    }
+    return failed ? -1 : 0;
+}
+
+static int fake_writev(io_ops *o, io_seg *segs, size_t n)
+{
+    size_t i;
+    int failed = 0;
+
+    for (i = 0; i < n; i++) {
+        segs[i].res = fake_write(o, segs[i].buf, segs[i].off, segs[i].len);
+        if (segs[i].res < 0)
+            failed = 1;
+    }
+    return failed ? -1 : 0;
+}
+
 static int fake_flush(io_ops *o)
 {
     (void)o;
@@ -140,6 +166,8 @@ io_ops *io_fake_open(uint64_t reported, uint64_t real, int policy, int *err)
     f->policy = policy;
     f->ops.read = fake_read;
     f->ops.write = fake_write;
+    f->ops.readv = fake_readv;
+    f->ops.writev = fake_writev;
     f->ops.flush = fake_flush;
     f->ops.close = fake_close;
     f->ops.stats = xalloc(sizeof *f->ops.stats);

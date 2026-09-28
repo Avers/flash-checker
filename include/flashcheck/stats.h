@@ -5,6 +5,7 @@
 #include "flashcheck/pattern.h"
 
 #define SPEED_MAX_SAMPLES 8192
+#define SPEED_WINDOW_MS 50
 
 typedef struct {
     uint64_t t_ms;

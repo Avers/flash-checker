@@ -2,6 +2,11 @@
 
 #include "flashcheck/util.h"
 
+_Static_assert(PIPELINE_BATCH_MAX >= GEN_POOL_MAX_DEPTH,
+               "write and read batches must cover the deepest generator pool");
+
+static int drain_writes(pipeline *p, stage_stats *st);
+
 int pipeline_init(pipeline *p, io_ops *io, uint64_t chunk, pattern_kind kind, uint64_t test_id,
                   uint64_t capacity, int depth, char *err, size_t errn)
 {
@@ -19,10 +24,16 @@ int pipeline_init(pipeline *p, io_ops *io, uint64_t chunk, pattern_kind kind, ui
     p->capacity = capacity;
     p->kind = kind;
     p->test_id = test_id;
-    p->got = xalloc_aligned(FC_ALIGN, (size_t)chunk);
+    p->wbatch = depth >= 2 && io->writev != NULL ? depth : 0;
+    p->rbatch = depth >= 2 && io->readv != NULL ? depth : 0;
+    if (p->rbatch > 0)
+        p->rd_arena = xalloc_aligned(FC_ALIGN, (size_t)p->rbatch * (size_t)chunk);
+    else
+        p->got = xalloc_aligned(FC_ALIGN, (size_t)chunk);
     p->pool = gen_pool_create(kind, test_id, chunk, capacity, depth);
     if (p->pool == NULL) {
         free(p->got);
+        free(p->rd_arena);
         snprintf(err, errn, "cannot create generator pool");
         return -1;
     }
@@ -31,8 +42,15 @@ int pipeline_init(pipeline *p, io_ops *io, uint64_t chunk, pattern_kind kind, ui
 
 void pipeline_free(pipeline *p)
 {
+    if (p->npend > 0) {
+        stage_stats st;
+
+        stage_stats_reset(&st);
+        drain_writes(p, &st);
+    }
     gen_pool_destroy(p->pool);
     free(p->got);
+    free(p->rd_arena);
     memset(p, 0, sizeof *p);
 }
 
@@ -64,9 +82,41 @@ void pipeline_timing(const pipeline *p, uint64_t *gen_ns, uint64_t *io_ns)
     *io_ns = p->io_ns;
 }
 
-int pipeline_write(pipeline *p, uint64_t off, uint32_t pass, stage_stats *st)
+static int drain_writes(pipeline *p, stage_stats *st)
 {
-    size_t len = pipeline_len(p, off);
+    io_seg segs[PIPELINE_BATCH_MAX];
+    uint64_t t0;
+    int i, failed = 0;
+
+    if (p->npend == 0)
+        return 0;
+
+    for (i = 0; i < p->npend; i++) {
+        segs[i].buf = p->pend[i].buf;
+        segs[i].off = p->pend[i].off;
+        segs[i].len = p->pend[i].len;
+        segs[i].res = 0;
+    }
+    t0 = now_ns();
+    p->io->writev(p->io, segs, (size_t)p->npend);
+    p->io_ns += now_ns() - t0;
+
+    for (i = 0; i < p->npend; i++) {
+        gen_pool_release(p->pool, p->pend[i].buf);
+        if (segs[i].res < 0) {
+            st->chunks_written--;
+            st->bytes_written -= p->pend[i].len;
+            st->io_errors++;
+            failed = 1;
+        }
+    }
+    p->npend = 0;
+    p->rd_n = 0;
+    return failed ? -1 : 0;
+}
+
+static int write_one(pipeline *p, uint64_t off, uint32_t pass, size_t len, stage_stats *st)
+{
     uint8_t *exp = gen_pool_take(p->pool, off, pass);
     uint64_t t0 = now_ns();
     int r = p->io->write(p->io, exp, off, len);
@@ -82,24 +132,131 @@ int pipeline_write(pipeline *p, uint64_t off, uint32_t pass, stage_stats *st)
     return 0;
 }
 
+int pipeline_write(pipeline *p, uint64_t off, uint32_t pass, stage_stats *st)
+{
+    size_t len = pipeline_len(p, off);
+
+    p->rd_n = 0;
+    if (p->wbatch == 0)
+        return write_one(p, off, pass, len, st);
+
+    if (p->npend >= p->wbatch && drain_writes(p, st) != 0)
+        return -1;
+    p->pend[p->npend].buf = gen_pool_take(p->pool, off, pass);
+    p->pend[p->npend].off = off;
+    p->pend[p->npend].len = len;
+    p->npend++;
+    st->chunks_written++;
+    st->bytes_written += len;
+    return 0;
+}
+
+static int rdq_want_batch(const pipeline *p, uint64_t off)
+{
+    if (p->rd_n == 0)
+        return 1;
+    if (off == p->rd[0].off + (uint64_t)p->rd_n * p->chunk)
+        return 1;
+    return 0;
+}
+
+static int rdq_fill(pipeline *p, uint64_t off, uint32_t pass, int batched)
+{
+    io_seg segs[PIPELINE_BATCH_MAX];
+    uint64_t t0;
+    int i, n = 0;
+    int want = batched ? p->rbatch : 1;
+
+    p->rd_n = 0;
+    for (i = 0; i < want; i++) {
+        uint64_t o = off + (uint64_t)i * p->chunk;
+
+        if (o >= p->capacity)
+            break;
+        segs[n].buf = p->rd_arena + (size_t)n * p->chunk;
+        segs[n].off = o;
+        segs[n].len = pipeline_len(p, o);
+        segs[n].res = 0;
+        p->rd[n].off = o;
+        p->rd[n].pass = pass;
+        p->rd[n].valid = 0;
+        p->rd[n].res = 0;
+        n++;
+    }
+    p->rd_n = n;
+    if (n == 0)
+        return -EINVAL;
+
+    t0 = now_ns();
+    p->io->readv(p->io, segs, (size_t)n);
+    p->io_ns += now_ns() - t0;
+
+    for (i = 0; i < n; i++) {
+        p->rd[i].res = segs[i].res;
+        p->rd[i].valid = segs[i].res == 0;
+    }
+    return 0;
+}
+
+static int verify_read(pipeline *p, uint64_t off, uint32_t pass, size_t len, const uint8_t **out)
+{
+    int i;
+
+    if (p->rbatch == 0) {
+        uint64_t t0 = now_ns();
+        int r = p->io->read(p->io, p->got, off, len);
+
+        p->io_ns += now_ns() - t0;
+        if (r < 0)
+            return r;
+        *out = p->got;
+        return 0;
+    }
+
+    for (i = 0; i < p->rd_n; i++) {
+        if (p->rd[i].valid && p->rd[i].off == off && p->rd[i].pass == pass) {
+            *out = p->rd_arena + (size_t)i * p->chunk;
+            return 0;
+        }
+    }
+
+    if (rdq_fill(p, off, pass, rdq_want_batch(p, off)) != 0)
+        return -EINVAL;
+    if (p->rd[0].off != off)
+        return -EINVAL;
+    if (!p->rd[0].valid)
+        return p->rd[0].res < 0 ? p->rd[0].res : -EIO;
+    *out = p->rd_arena;
+    return 0;
+}
+
 int pipeline_verify(pipeline *p, uint64_t off, uint32_t pass, stage_stats *st)
 {
     pattern_id id = id_for(p, off, pass);
     size_t len = pipeline_len(p, off);
-    uint8_t *exp = gen_pool_take(p->pool, off, pass);
+    uint8_t *exp;
+    const uint8_t *got;
     size_t bad;
-    uint64_t t0 = now_ns();
-    int r = p->io->read(p->io, p->got, off, len);
+    int r;
 
-    p->io_ns += now_ns() - t0;
+    if (p->npend > 0 && drain_writes(p, st) != 0)
+        return -1;
+
+    if (len == 0) {
+        st->chunks_verified++;
+        return 0;
+    }
+
+    exp = gen_pool_take(p->pool, off, pass);
+    r = verify_read(p, off, pass, len, &got);
     if (r < 0) {
         gen_pool_release(p->pool, exp);
         st->io_errors++;
-        return r;
+        return -1;
     }
     st->chunks_verified++;
     st->bytes_verified += len;
-    bad = first_diff(exp, p->got, len);
+    bad = first_diff(exp, got, len);
     if (bad == len) {
         gen_pool_release(p->pool, exp);
         return 0;
@@ -112,7 +269,7 @@ int pipeline_verify(pipeline *p, uint64_t off, uint32_t pass, stage_stats *st)
         st->has_first_fail = 1;
         st->first_fail_off = off + bad;
         st->first_fail_lba = off / p->chunk;
-        if (pattern_parse_header(p->got, &src) && src.test_id == p->test_id) {
+        if (pattern_parse_header(got, &src) && src.test_id == p->test_id) {
             if (src.chunk_index != id.chunk_index) {
                 pattern_id cand = id;
                 uint8_t *tmp = xalloc_aligned(FC_ALIGN, len);
@@ -120,7 +277,7 @@ int pipeline_verify(pipeline *p, uint64_t off, uint32_t pass, stage_stats *st)
                 st->has_alias = 1;
                 st->alias_src_off = src.chunk_index * p->chunk;
                 pattern_fill(p->kind, tmp, len, &cand, 0);
-                st->alias_confirmed = first_diff(tmp, p->got, len) == len;
+                st->alias_confirmed = first_diff(tmp, got, len) == len;
                 free(tmp);
             } else {
                 st->stale_data = 1;
@@ -133,6 +290,13 @@ int pipeline_verify(pipeline *p, uint64_t off, uint32_t pass, stage_stats *st)
     }
     gen_pool_release(p->pool, exp);
     return 1;
+}
+
+int pipeline_flush(pipeline *p, stage_stats *st)
+{
+    if (p->npend > 0 && drain_writes(p, st) != 0)
+        return -1;
+    return p->io->flush(p->io);
 }
 
 int pipeline_window_pass(pipeline *p, uint64_t start, uint64_t end, uint64_t window_chunks,
@@ -153,7 +317,7 @@ int pipeline_window_pass(pipeline *p, uint64_t start, uint64_t end, uint64_t win
             if (pipeline_write(p, w, pass, st) != 0)
                 return -1;
         }
-        if (p->io->flush(p->io) != 0) {
+        if (pipeline_flush(p, st) != 0) {
             st->io_errors++;
             return -1;
         }

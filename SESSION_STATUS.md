@@ -149,31 +149,85 @@ wait-on-`cv_done` instead of spin (and `release` now broadcasts).
 
 ---
 
+## Round 5 — io_uring SQE/CQE Batching (branch `ai/uring-batching`, task #1)
+
+### What Was Built
+
+Batching now spans three layers: the io vtable, the uring backend, and the
+pipeline.
+
+| File | Change |
+|------|--------|
+| `include/flashcheck/io.h` | `io_seg {buf, off, len, res}` (`res`: 0 on success, negative errno on failure) and optional `readv`/`writev` in `io_ops`; NULL means "caller falls back to per-op" |
+| `src/io/uring.c` | Wave-based batched submit/reap: up to `ring_entries` (32) SQEs in flight, `uring_submit_wait()` submits and waits in one `io_uring_enter(SUBMIT\|GETEVENTS)`, CQEs consumed from the ring without syscalls; user_data = segment index + 1; per-segment retry (`EINTR/EIO/ETIMEDOUT/EBUSY/EAGAIN`), partial-transfer advance, ring-level failures poison `u->err` and fail-fast afterwards; slices of 64 segs for `>ring_entries` batches; single-op `read`/`write`/`fsync` unified through the same path |
+| `src/io/fake.c` | `readv`/`writev` as loops over the existing single-op functions — the whole existing test suite therefore exercises the new pipeline batching |
+| `include/flashcheck/pipeline.h` | `PIPELINE_BATCH_MAX 16`, `pipeline_pend`/`pipeline_rd` queue/window state, `pipeline_flush()` |
+| `src/scheduler/pipeline.c` | Write-behind queue (drains at queue-full, before reads, at flush, at free; only when `depth >= 2` and the backend has `writev`); read-ahead window (arena of `depth × chunk`, filled sequentially, invalidated on every write); stats counted at enqueue and un-counted per failed segment on drain; zero-length verify at `off == capacity` kept succeeding as before |
+| `src/test/*.c`, `tests/*.c` | 7 stage/`pipeline_window_pass` + 3 test call sites moved from `io->flush(...)` to `pipeline_flush(&pl, &st)` — **contract: with batching active, stages must flush through `pipeline_flush`** (the sync backend has no vector ops, so its behaviour is unchanged) |
+| `tests/test_uring.c` | Batch suite: 40-SQE write+read beyond ring size (multi-wave), mixed aligned/unaligned/zero-length segments, per-segment failure reporting; **pipeline-over-uring integration**: write-behind queue + flush + read-ahead verify against a real temp file, including a byte corrupted after the write that must be detected through the batched read |
+| `tests/test_pool.c` | Write-queue progress before flush, read-ahead serves sequential verifies, a new write invalidates the window, failed batch un-counts bytes and reports `io_errors` |
+
+### Bugs Found and Fixed During Development
+
+| Symptom | Root cause | Fix |
+|---------|-----------|-----|
+| `--self-test=honest`: `Stage capacity-boundary: FAILED 1 of 4 regions differ, first failure: 0.00 B`, then `mode gating` test failures + a segfault | Verifying `off == capacity` produces `len == 0`; the new read-ahead fill returned `-EINVAL` for an empty window, so `pipeline_verify` reported an I/O error and `probe_ok` counted it as a mismatch with `first_fail_off = 0` | Treat `len == 0` as an already-verified chunk (matches the old `pread(…, 0)` behaviour) |
+| `bench measures write and read speed`: `bytes_written == 2 MiB` instead of 4 MiB | Write-behind stats were only applied at drain time, and the stage report is built after the last drain without another `speed_mark` | Count `chunks_written`/`bytes_written` at enqueue and subtract per failed segment on drain — progress, speed tracks and reports are then exact at all times |
+| LeakSanitizer: 4 MiB leak from `pipeline_init` in `test_window_pass` | The test re-initialised a pipeline without freeing the first one (the arena made it larger) | `pipeline_free(&p)` before the re-init |
+
+### Verification (all green)
+
+| Command | Result |
+|---------|--------|
+| `make clean && make` / `make FLASHCHECK_IO_URING=1` | ✅ no warnings under `-Werror` |
+| `make test` | ✅ **549 checks, 0 failures** (294 → 549) + CLI smoke (honest 0, alias 1, stale 1, error 4) |
+| `make FLASHCHECK_IO_URING=1 test` | ✅ 549 checks, 0 failures |
+| ASAN+UBSAN+LSan (`CFLAGS="-O0 -g -fsanitize=address,undefined …"`) | ✅ clean, 549 checks, no leaks |
+| TSan (`CFLAGS="-O0 -g -fsanitize=thread"`, test binary) | ✅ 549 checks, **0 data races** |
+| `make lint` | ✅ (clang-tidy not installed → `-Werror` build) |
+
+### Known Issues / Follow-ups from This Round
+
+1. **`make asan` cannot compile on this toolchain**: `src/util.c:29: null format
+   string [-Werror=format-overflow=]` at `-O1` — **reproduced on the unmodified
+   baseline**, so it is pre-existing and out of scope here; sanitizer runs used
+   `-O0` instead. Needs a separate fix (approve before touching `src/util.c`).
+2. `--self-test` always opens `io_fake_open()` and **ignores `--io-backend`**, so
+   backend throughput comparisons are not possible through it; uring coverage
+   comes from `tests/test_uring.c` (roundtrip, batching, O_DIRECT, and the new
+   pipeline integration). Real-hardware `uring` vs `sync` comparison remains
+   outstanding (needs a block device, i.e. developer approval).
+3. The read-ahead window is invalidated by `pipeline_write` only. Every current
+   stage writes before it verifies, so no stale data can be served; if a future
+   stage verifies ranges written by an earlier run (`--resume`), the window is
+   empty at start and reads fresh.
+
+---
+
 ## Current Project Status
 
 ### Phase Completion
 - **Phase 0 (Research)**: ✅ Complete (design.md, IMPLEMENTATION_PLAN.md)
 - **Phase 1 (Skeleton + v0.1)**: ✅ Complete
 - **Phase 2 (Patterns, Sparse, Retention, Boundary)**: ✅ Complete
-- **Phase 3 (Performance)**: 🟡 io_uring backend correct/tested/O_DIRECT-aware; read-path parallelization done (generator pool, `--depth`); bench subcommand done (PR #3); uring batching still open
+- **Phase 3 (Performance)**: 🟡 io_uring backend correct/tested/O_DIRECT-aware; read-path parallelization done (generator pool, `--depth`); bench subcommand done (PR #3); **SQE/CQE batching done (Round 5, awaiting commit approval)**
 - **Phase 4 (Reporting/Resume/Orchestration)**: ✅ Complete (adaptive orchestration landed in PR #7)
 
 ### What's Next (Priority Order)
 
 | Priority | Task | Phase | Effort |
 |----------|------|-------|--------|
-| 1 | io_uring SQE/CQE batching (submit-and-wait per op) | P3 | Medium |
-| 2 | Batched release: `CHANGELOG.md` + `VERSION` bump | — | Low |
-| 3 | Real-hardware `--io-backend=uring` vs `sync` comparison | P3 | Low |
+| 1 | Batched release: `CHANGELOG.md` + `VERSION` bump | — | Low |
+| 2 | Real-hardware `--io-backend=uring` vs `sync` comparison | P3 | Low |
+| 3 | Fix `make asan` on gcc 16 (`src/util.c:29` null format string at `-O1`) | — | Low |
 
 Landed this session: bench subcommand (PR #3), macOS/Linux mount detection
 (PR #4), mount-refusal ordering (PR #5), stage speed stats (PR #6),
-adaptive default (PR #7).
+adaptive default (PR #7), io_uring SQE/CQE batching (Round 5, uncommitted).
 
 ### Known Follow-ups (io_uring)
 
-1. Single SQE/CQE, submit-and-wait per op — batching is the natural next step and
-   a prerequisite for read-path parallelization.
+1. ~~Single SQE/CQE, submit-and-wait per op~~ — batching landed in Round 5.
 2. Real-hardware comparison of `--io-backend=uring` vs `sync` still outstanding.
 3. Exercise the `--io-backend=uring` CLI path (and its warning) on a real block
    device — needs developer approval.

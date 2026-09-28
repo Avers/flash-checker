@@ -38,7 +38,7 @@ int stage_sparse(run_ctx *c, stage_report *r)
         }
         speed_mark(&w, st.bytes_written);
     }
-    if (c->io->flush(c->io) != 0) {
+    if (pipeline_flush(&c->pl, &st) != 0) {
         r->io_errors = ++st.io_errors;
         snprintf(r->note, sizeof r->note, "flush failed");
         speed_free(&w);

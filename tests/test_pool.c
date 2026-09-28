@@ -157,12 +157,94 @@ static void test_pipeline_prefetched_offsets(void)
         if (pipeline_write(&p, offs[i], 1, &st) != 0)
             break;
     }
-    CHECK_EQ_U64(io->flush(io), 0);
+    CHECK_EQ_U64(pipeline_flush(&p, &st), 0);
     CHECK_EQ_U64(st.chunks_written, 4);
     stage_stats_reset(&st);
     CHECK_EQ_U64(pipeline_verify_offsets(&p, offs, 4, 1, &st, 0), 0);
     CHECK_EQ_U64(st.chunks_verified, 4);
     CHECK_EQ_U64(st.chunks_failed, 0);
+    pipeline_free(&p);
+    io->close(io);
+}
+
+static void test_pipeline_write_queue(void)
+{
+    io_ops *io;
+    pipeline p;
+    stage_stats st;
+    char err[128];
+    int e = 0;
+    int rc = 0;
+    int i;
+
+    T_BEGIN("batched writes report progress before the flush");
+    io = io_fake_open(16u << 20, 16u << 20, FAKE_HONEST, &e);
+    CHECK(io != NULL);
+    if (io == NULL)
+        return;
+    CHECK_EQ_U64(pipeline_init(&p, io, 1u << 20, PAT_CHACHA20, 13, 16u << 20, 4, err, sizeof err),
+                 0);
+    stage_stats_reset(&st);
+    for (i = 0; i < 6; i++) {
+        if (pipeline_write(&p, (uint64_t)i << 20, 1, &st) != 0) {
+            T_FAIL("write %d failed", i);
+            rc = 1;
+            break;
+        }
+    }
+    CHECK_EQ_U64(rc, 0);
+    CHECK_EQ_U64(st.chunks_written, 6);
+    CHECK_EQ_U64(pipeline_flush(&p, &st), 0);
+    CHECK_EQ_U64(st.chunks_written, 6);
+
+    T_BEGIN("read-ahead window serves sequential verifies");
+    stage_stats_reset(&st);
+    for (i = 0; i < 6; i++) {
+        if (pipeline_verify(&p, (uint64_t)i << 20, 1, &st) != 0) {
+            T_FAIL("verify %d failed", i);
+            break;
+        }
+    }
+    CHECK_EQ_U64(st.chunks_verified, 6);
+    CHECK_EQ_U64(st.chunks_failed, 0);
+
+    T_BEGIN("a new write invalidates the read-ahead window");
+    stage_stats_reset(&st);
+    CHECK_EQ_U64(pipeline_write(&p, 0, 2, &st), 0);
+    CHECK_EQ_U64(pipeline_flush(&p, &st), 0);
+    stage_stats_reset(&st);
+    CHECK_EQ_U64(pipeline_verify(&p, 0, 2, &st), 0);
+    CHECK_EQ_U64(st.chunks_verified, 1);
+    CHECK_EQ_U64(st.chunks_failed, 0);
+
+    pipeline_free(&p);
+    io->close(io);
+}
+
+static void test_pipeline_failed_batch(void)
+{
+    io_ops *io;
+    pipeline p;
+    stage_stats st;
+    char err[128];
+    int e = 0;
+    int i;
+
+    T_BEGIN("failed batched writes are un-counted and reported as io errors");
+    io = io_fake_open(16u << 20, 4u << 20, FAKE_ERROR, &e);
+    CHECK(io != NULL);
+    if (io == NULL)
+        return;
+    CHECK_EQ_U64(pipeline_init(&p, io, 1u << 20, PAT_CHACHA20, 17, 16u << 20, 4, err, sizeof err),
+                 0);
+    stage_stats_reset(&st);
+    for (i = 0; i < 8; i++)
+        pipeline_write(&p, (uint64_t)i << 20, 1, &st);
+    CHECK_EQ_U64(st.chunks_written, 8);
+    CHECK(pipeline_flush(&p, &st) != 0);
+    CHECK_EQ_U64(st.chunks_written, 4);
+    CHECK_EQ_U64(st.bytes_written, 4u << 20);
+    CHECK_EQ_U64(st.io_errors, 4);
     pipeline_free(&p);
     io->close(io);
 }
@@ -174,4 +256,6 @@ void test_pool(void)
     test_pool_depth_zero();
     test_pipeline_parallel();
     test_pipeline_prefetched_offsets();
+    test_pipeline_write_queue();
+    test_pipeline_failed_batch();
 }

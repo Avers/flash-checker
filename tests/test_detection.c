@@ -105,7 +105,7 @@ static void run_case(const char *name, int policy, uint64_t reported, uint64_t r
         if (pipeline_write(&p, off, 1, &st) != 0)
             break;
     }
-    CHECK_EQ_U64(io->flush(io), 0);
+    CHECK_EQ_U64(pipeline_flush(&p, &st), 0);
     for (off = 0; off < end; off += chunk) {
         if (pipeline_verify(&p, off, 1, &st) != 0)
             failed = 1;
@@ -142,7 +142,7 @@ static void test_alias_attribution(void)
     pipeline_init(&p, io, chunk, PAT_CHACHA20, 99, 16u << 20, 0, err, sizeof err);
     stage_stats_reset(&st);
     pipeline_write(&p, src, 1, &st);
-    io->flush(io);
+    pipeline_flush(&p, &st);
     CHECK_EQ_U64(pipeline_verify(&p, 12u << 20, 1, &st), 1);
     CHECK(st.has_alias);
     CHECK(st.alias_confirmed);
@@ -171,6 +171,7 @@ static void test_window_pass(void)
     CHECK_EQ_U64(st.chunks_failed, 0);
     CHECK_EQ_U64(st.bytes_written, 8u << 20);
     T_BEGIN("window pass stops at first failure");
+    pipeline_free(&p);
     io->close(io);
     io = io_fake_open(16u << 20, 5u << 20, FAKE_ALIAS, &e);
     pipeline_init(&p, io, chunk, PAT_CHACHA20, 5, 16u << 20, 4, err, sizeof err);
@@ -198,6 +199,43 @@ static void test_speed_track(void)
     CHECK(sec > 0);
     CHECK(avg > 0);
     CHECK(t.n > 0);
+    speed_free(&t);
+}
+
+static void test_speed_peak_window(void)
+{
+    speed_track t;
+    uint64_t bytes = 0;
+    double sec = 0, avg = 0, mx = 0, mn = 0;
+
+    T_BEGIN("speed peak ignores bursts shorter than the window");
+    speed_init(&t);
+    sleep_ms(1);
+    speed_mark(&t, 0);
+    sleep_ms(2);
+    speed_mark(&t, 8u << 20);
+    for (int i = 0; i < 40; i++) {
+        sleep_ms(5);
+        speed_mark(&t, (uint64_t)(8u << 20) + (uint64_t)(i + 1) * 64u * 1024u);
+    }
+    speed_summary(&t, &bytes, &sec, &avg, &mx, &mn);
+    CHECK(bytes == (uint64_t)(8u << 20) + 40ull * 64ull * 1024ull);
+    CHECK(sec > 0);
+    CHECK(avg > 0);
+    CHECK(mx > 0);
+    CHECK(mx < (512ull << 20));
+    CHECK(mx >= mn);
+    speed_free(&t);
+
+    T_BEGIN("speed peak falls back to the average on a track shorter than the window");
+    speed_init(&t);
+    sleep_ms(20);
+    speed_mark(&t, 4u << 20);
+    speed_summary(&t, &bytes, &sec, &avg, &mx, &mn);
+    CHECK(avg > 0);
+    CHECK(mx >= avg * 0.99);
+    CHECK(mx <= avg * 1.01);
+    CHECK(mn <= mx * 1.01);
     speed_free(&t);
 }
 
@@ -466,6 +504,46 @@ static void test_mode_gating(void)
     CHECK(ctx.has_capacity == 1);
     CHECK(run_verdict(&ctx) == VERDICT_PASS);
 
+    dev.capacity = 8u << 20;
+    reported = 8u << 20;
+    cfg.chunk_size = 64u << 10;
+    chunk = 64u << 10;
+
+    T_BEGIN("standard certifies when the tested range covers the claim");
+    CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_HONEST, reported, reported, chunk), 0);
+    CHECK_EQ_U64(ctx.nst, 5);
+    CHECK(ctx.st[4].has_capacity == 1);
+    CHECK_EQ_U64(ctx.st[4].chunks_failed, 0);
+    CHECK(ctx.has_capacity == 1);
+    CHECK(run_verdict(&ctx) == VERDICT_PASS);
+
+    cfg.limit = reported;
+
+    T_BEGIN("a limit that reaches the full claim still certifies");
+    CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_HONEST, reported, reported, chunk), 0);
+    CHECK(ctx.has_capacity == 1);
+    CHECK(run_verdict(&ctx) == VERDICT_PASS);
+
+    cfg.limit = reported / 2;
+
+    T_BEGIN("standard cannot certify a range-limited run");
+    CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_HONEST, reported, reported, chunk), 0);
+    CHECK_EQ_U64(ctx.nst, 5);
+    CHECK(ctx.st[4].has_capacity == 1);
+    CHECK_EQ_U64(ctx.st[4].chunks_failed, 0);
+    CHECK(ctx.has_capacity == 0);
+    CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
+
+    T_BEGIN("a failure inside a limited range still fails");
+    CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_ALIAS, reported, reported / 4, chunk), 0);
+    CHECK(run_verdict(&ctx) == VERDICT_FAIL);
+
+    cfg.limit = 0;
+    cfg.chunk_size = 1u << 20;
+    chunk = 1u << 20;
+    dev.capacity = 16u << 20;
+    reported = 16u << 20;
+
     T_BEGIN("adaptive escalates to full verify on a clean device");
     cfg.mode = MODE_ADAPTIVE;
     CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_HONEST, reported, reported, chunk), 0);
@@ -494,6 +572,7 @@ void test_io_and_detection(void)
     test_alias_attribution();
     test_window_pass();
     test_speed_track();
+    test_speed_peak_window();
     test_checkpoint();
     test_safety_mounted();
     test_verdict();

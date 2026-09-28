@@ -47,6 +47,8 @@ void speed_summary(const speed_track *t, uint64_t *bytes, double *sec, double *a
 {
     double elapsed = (double)(t->last_ms - t->start_ms) / 1000.0;
     double mx = 0, mn = 0;
+    int have = 0;
+    size_t j = 0;
 
     if (bytes != NULL)
         *bytes = t->total_bytes;
@@ -55,16 +57,24 @@ void speed_summary(const speed_track *t, uint64_t *bytes, double *sec, double *a
     if (avg_bps != NULL)
         *avg_bps = elapsed > 0 ? (double)t->total_bytes / elapsed : 0;
     for (size_t i = 1; i < t->n; i++) {
-        double dt = (double)(t->s[i].t_ms - t->s[i - 1].t_ms) / 1000.0;
-        double db = (double)(t->s[i].total_bytes - t->s[i - 1].total_bytes);
-        double bps;
-        if (dt <= 0)
+        double dt, db, bps;
+
+        while (j + 1 < i && (t->s[i].t_ms - t->s[j + 1].t_ms) >= SPEED_WINDOW_MS)
+            j++;
+        if (t->s[i].t_ms - t->s[j].t_ms < SPEED_WINDOW_MS)
             continue;
+        dt = (double)(t->s[i].t_ms - t->s[j].t_ms) / 1000.0;
+        db = (double)(t->s[i].total_bytes - t->s[j].total_bytes);
         bps = db / dt;
-        if (i == 1 || bps > mx)
+        if (!have || bps > mx)
             mx = bps;
-        if (i == 1 || bps < mn)
+        if (!have || bps < mn)
             mn = bps;
+        have = 1;
+    }
+    if (!have && elapsed > 0) {
+        mx = (double)t->total_bytes / elapsed;
+        mn = mx;
     }
     if (max_bps != NULL)
         *max_bps = mx;

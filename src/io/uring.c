@@ -27,6 +27,7 @@
 #define URING_ENTRIES 32
 #define URING_MAX_RETRY 4
 #define URING_SECTOR 512
+#define URING_MAX_SLICE 64
 
 struct io_uring_sqe {
     uint8_t opcode;
@@ -132,6 +133,7 @@ typedef struct {
     struct io_uring_cq cq;
     uint32_t ring_entries;
     int writable;
+    int err;
 } io_uring;
 
 static int uring_setup(unsigned entries, struct io_uring_params *params)
@@ -240,21 +242,52 @@ static void uring_seen_cqe(io_uring *u)
     ring_store(u->cq.head, ring_load(u->cq.head) + 1);
 }
 
+static int uring_submit_wait(io_uring *u, unsigned min_cq)
+{
+    for (;;) {
+        uint32_t sqh = ring_load(u->sq.head);
+        uint32_t sqt = ring_load(u->sq.tail);
+        uint32_t cqh = ring_load(u->cq.head);
+        uint32_t cqt = ring_load(u->cq.tail);
+        unsigned to_submit = sqt - sqh;
+        int r;
+
+        if (to_submit == 0 && cqt - cqh >= min_cq)
+            return 0;
+        r = uring_enter(u->ring_fd, to_submit, min_cq, IORING_ENTER_GETEVENTS);
+        if (r == -EINTR)
+            continue;
+        if (r < 0)
+            return r;
+        if (to_submit != 0 && ring_load(u->sq.head) == sqh)
+            return -EIO;
+    }
+}
+
 static int uring_transact(io_uring *u, int *res)
 {
+    struct io_uring_cqe *cqe;
+    uint32_t mask = ring_load(u->sq.ring_mask);
     uint32_t tail = __atomic_load_n(u->sq.tail, __ATOMIC_RELAXED);
+    int r;
 
-    u->sq.array[tail & ring_load(u->sq.ring_mask)] = 0;
+    if (u->err != 0)
+        return u->err;
+
+    u->sq.array[tail & mask] = 0;
     __atomic_store_n(u->sq.tail, tail + 1, __ATOMIC_RELEASE);
 
-    int r = uring_enter(u->ring_fd, 1, 0, 0);
-    if (r < 0)
+    r = uring_submit_wait(u, 1);
+    if (r < 0) {
+        u->err = r;
         return r;
+    }
 
-    struct io_uring_cqe *cqe;
     r = uring_wait_cqe(u, &cqe);
-    if (r < 0)
+    if (r < 0) {
+        u->err = r;
         return r;
+    }
 
     *res = cqe->res;
     uring_seen_cqe(u);
@@ -263,7 +296,7 @@ static int uring_transact(io_uring *u, int *res)
 
 static int uring_retryable(int e)
 {
-    return e == -EINTR || e == -EIO || e == -ETIMEDOUT || e == -EBUSY;
+    return e == -EINTR || e == -EIO || e == -ETIMEDOUT || e == -EBUSY || e == -EAGAIN;
 }
 
 static int uring_can_direct(const io_uring *u, uint64_t off, size_t len)
@@ -284,59 +317,197 @@ static int uring_fd_for(const io_uring *u, uint64_t off, size_t len)
     return u->fd;
 }
 
-static int uring_xfer(io_uring *u, uint8_t opcode, void *buf, uint64_t off, size_t len)
+static void uring_prep_rw(io_uring *u, uint32_t slot, const io_seg *s, int is_write, size_t idx)
 {
-    int attempt = 0;
-    int xfd;
+    struct io_uring_sqe *sqe = &u->sqes[slot];
 
+    memset(sqe, 0, sizeof *sqe);
+    sqe->opcode = is_write ? IORING_OP_WRITE : IORING_OP_READ;
+    sqe->fd = uring_fd_for(u, s->off, s->len);
+    sqe->off = s->off;
+    sqe->addr = (uint64_t)(uintptr_t)s->buf;
+    sqe->len = (uint32_t)s->len;
+    sqe->user_data = (uint64_t)idx + 1;
+}
+
+static int uring_rw_slice(io_uring *u, int is_write, io_seg *segs, size_t n)
+{
+    io_seg work[URING_MAX_SLICE];
+    size_t pend[URING_MAX_SLICE];
+    uint8_t att[URING_MAX_SLICE];
+    uint8_t done[URING_MAX_SLICE];
+    size_t i, j;
+    int failed = 0;
+
+    for (i = 0; i < n; i++) {
+        work[i] = segs[i];
+        att[i] = 0;
+        done[i] = u->err != 0;
+        segs[i].res = u->err;
+        if (done[i])
+            continue;
+        if (work[i].len == 0)
+            done[i] = 1;
+        else if (work[i].len > UINT32_MAX) {
+            segs[i].res = -EINVAL;
+            done[i] = 1;
+        }
+    }
+
+    for (;;) {
+        uint32_t mask, tail;
+        size_t wave = 0;
+        int r;
+
+        for (i = 0; i < n; i++) {
+            if (done[i])
+                continue;
+            if (wave == (size_t)u->ring_entries)
+                break;
+            pend[wave++] = i;
+        }
+        if (wave == 0)
+            break;
+
+        mask = ring_load(u->sq.ring_mask);
+        tail = ring_load(u->sq.tail);
+        for (i = 0; i < wave; i++) {
+            uint32_t slot = (tail + (uint32_t)i) & mask;
+
+            u->sq.array[slot] = slot;
+            uring_prep_rw(u, slot, &work[pend[i]], is_write, pend[i]);
+        }
+        ring_store(u->sq.tail, tail + (uint32_t)wave);
+
+        r = uring_submit_wait(u, (unsigned)wave);
+        if (r < 0) {
+            u->err = r;
+            for (j = 0; j < n; j++) {
+                if (!done[j]) {
+                    segs[j].res = r;
+                    done[j] = 1;
+                }
+            }
+            break;
+        }
+
+        for (i = 0; i < wave; i++) {
+            struct io_uring_cqe *cqe;
+            size_t idx;
+            int res;
+
+            r = uring_wait_cqe(u, &cqe);
+            if (r < 0) {
+                u->err = r;
+                for (j = 0; j < n; j++) {
+                    if (!done[j]) {
+                        segs[j].res = r;
+                        done[j] = 1;
+                    }
+                }
+                break;
+            }
+            idx = (size_t)cqe->user_data - 1;
+            res = cqe->res;
+            uring_seen_cqe(u);
+
+            if (idx >= n || done[idx]) {
+                u->err = -EIO;
+                for (j = 0; j < n; j++) {
+                    if (!done[j]) {
+                        segs[j].res = -EIO;
+                        done[j] = 1;
+                    }
+                }
+                break;
+            }
+
+            if (res < 0 && uring_retryable(res) && att[idx] + 1 < URING_MAX_RETRY) {
+                att[idx]++;
+                sleep_ms(20u * (unsigned)att[idx]);
+                continue;
+            }
+            if (res >= 0 && (size_t)res < work[idx].len) {
+                if (res > 0 && att[idx] + 1 < URING_MAX_RETRY * 2) {
+                    att[idx]++;
+                    work[idx].buf = (uint8_t *)work[idx].buf + res;
+                    work[idx].off += (uint64_t)res;
+                    work[idx].len -= (size_t)res;
+                    continue;
+                }
+                res = -EIO;
+            }
+            segs[idx].res = res < 0 ? res : 0;
+            done[idx] = 1;
+        }
+    }
+
+    for (i = 0; i < n; i++) {
+        if (segs[i].res < 0) {
+            u->ops.stats->io_errors++;
+            failed = 1;
+        }
+    }
+    return failed ? -1 : 0;
+}
+
+static int uring_rw(io_uring *u, int is_write, io_seg *segs, size_t n)
+{
+    size_t done = 0;
+    size_t i;
+    int failed = 0;
+
+    while (done < n) {
+        size_t k = n - done;
+
+        if (k > URING_MAX_SLICE)
+            k = URING_MAX_SLICE;
+        uring_rw_slice(u, is_write, segs + done, k);
+        done += k;
+    }
+
+    for (i = 0; i < n; i++) {
+        if (segs[i].res < 0)
+            failed = 1;
+    }
+    return failed ? -1 : 0;
+}
+
+static int uring_xfer(io_uring *u, int is_write, void *buf, uint64_t off, size_t len)
+{
+    io_seg seg;
+
+    if (len == 0)
+        return 0;
     if (len > UINT32_MAX)
         return -EINVAL;
 
-    xfd = uring_fd_for(u, off, len);
-
-    for (;;) {
-        struct io_uring_sqe *sqe = u->sqes;
-        int res = 0;
-        int r;
-
-        memset(sqe, 0, sizeof *sqe);
-        sqe->opcode = opcode;
-        sqe->fd = xfd;
-        sqe->off = off;
-        sqe->addr = (uint64_t)(uintptr_t)buf;
-        sqe->len = (uint32_t)len;
-        sqe->user_data = 1;
-
-        r = uring_transact(u, &res);
-        if (r < 0) {
-            u->ops.stats->io_errors++;
-            return r;
-        }
-        if (uring_retryable(res) && attempt + 1 < URING_MAX_RETRY) {
-            attempt++;
-            sleep_ms(20u * (unsigned)attempt);
-            continue;
-        }
-        if (res < 0) {
-            u->ops.stats->io_errors++;
-            return res;
-        }
-        if ((size_t)res != len) {
-            u->ops.stats->io_errors++;
-            return -EIO;
-        }
-        return 0;
-    }
+    seg.buf = buf;
+    seg.off = off;
+    seg.len = len;
+    seg.res = 0;
+    uring_rw(u, is_write, &seg, 1);
+    return seg.res;
 }
 
 static int uring_read(io_ops *o, void *buf, uint64_t off, size_t len)
 {
-    return uring_xfer((io_uring *)o, IORING_OP_READ, buf, off, len);
+    return uring_xfer((io_uring *)o, 0, buf, off, len);
 }
 
 static int uring_write(io_ops *o, const void *buf, uint64_t off, size_t len)
 {
-    return uring_xfer((io_uring *)o, IORING_OP_WRITE, (void *)(uintptr_t)buf, off, len);
+    return uring_xfer((io_uring *)o, 1, (void *)(uintptr_t)buf, off, len);
+}
+
+static int uring_readv(io_ops *o, io_seg *segs, size_t n)
+{
+    return uring_rw((io_uring *)o, 0, segs, n);
+}
+
+static int uring_writev(io_ops *o, io_seg *segs, size_t n)
+{
+    return uring_rw((io_uring *)o, 1, segs, n);
 }
 
 static int uring_fsync_fd(io_uring *u, int fd)
@@ -477,6 +648,8 @@ io_ops *io_uring_open(const char *path, int writable, int want_direct, uint64_t 
 
     u->ops.read = uring_read;
     u->ops.write = uring_write;
+    u->ops.readv = uring_readv;
+    u->ops.writev = uring_writev;
     u->ops.flush = uring_flush;
     u->ops.close = uring_close;
     u->ops.name = "io_uring";

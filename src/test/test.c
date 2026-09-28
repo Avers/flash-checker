@@ -115,6 +115,9 @@ int run_execute(run_ctx *c)
     if (r->has_capacity) {
         c->reliable_capacity = r->reliable_capacity;
         c->has_capacity = 1;
+        if (r->chunks_failed == 0 && c->dev != NULL &&
+            (ctx_start(c) != 0 || ctx_end(c) < c->dev->capacity))
+            c->has_capacity = 0;
     }
     if (r->chunks_failed > 0 || m == MODE_STANDARD)
         return 0;
