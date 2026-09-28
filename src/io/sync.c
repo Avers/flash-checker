@@ -143,19 +143,26 @@ io_ops *io_sync_open(const char *path, int writable, int want_direct, uint64_t c
 {
     io_sync *s;
     int fd = -1, fd_buf = -1, e = 0;
+    int direct_active = 0;
 
-    fd = open_raw(path, writable, want_direct, &e);
+    if (want_direct) {
+        fd = open_raw(path, writable, 1, &e);
+        if (fd >= 0) {
+            fd_buf = open_raw(path, writable, 0, &e);
+            if (fd_buf >= 0)
+                direct_active = 1;
+            else {
+                close(fd);
+                fd = -1;
+            }
+        }
+    }
     if (fd < 0) {
         fd = open_raw(path, writable, 0, &e);
         if (fd < 0) {
             *err = e;
             return NULL;
         }
-    }
-    if (want_direct) {
-        fd_buf = open_raw(path, writable, 0, &e);
-        if (fd_buf < 0)
-            fd_buf = -1;
     }
 
     s = xalloc(sizeof *s);
@@ -168,7 +175,7 @@ io_ops *io_sync_open(const char *path, int writable, int want_direct, uint64_t c
     s->ops.close = sync_close;
     s->ops.stats = xalloc(sizeof *s->ops.stats);
     s->ops.stats->direct_requested = want_direct;
-    s->ops.stats->direct_active = want_direct && fd_buf >= 0;
+    s->ops.stats->direct_active = direct_active;
     s->ops.stats->capacity = capacity;
     s->ops.name = "sync";
     return &s->ops;

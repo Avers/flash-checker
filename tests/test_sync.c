@@ -76,6 +76,21 @@ void test_sync(void)
         io->close(io);
     }
 
+#ifdef __linux__
+    T_BEGIN("sync want_direct=1 on a device that rejects O_DIRECT");
+    e = 0;
+    io = io_sync_open("/dev/null", 1, 1, 4096, &e);
+    if (io == NULL) {
+        T_FAIL("io_sync_open(want_direct=1) on /dev/null failed: %s", errno_str(e));
+    } else {
+        CHECK_EQ_U64(io->stats->direct_requested, 1);
+        CHECK_EQ_U64(io->stats->direct_active, 0);
+        CHECK_EQ_U64(io->write(io, wbuf, 0, 4096), 0);
+        CHECK_EQ_U64(io->stats->io_errors, 0);
+        io->close(io);
+    }
+#endif
+
     unlink(path);
     free(wbuf);
     free(rbuf);
