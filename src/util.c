@@ -26,7 +26,7 @@ log_level log_get_level(void) { return g_level; }
 static void vlog(FILE *f, const char *prefix, const char *fmt, va_list ap)
 {
     fprintf(f, "%s", prefix);
-    vfprintf(f, fmt, ap);
+    vfprintf(f, fmt != NULL ? fmt : "", ap);
     fputc('\n', f);
     fflush(f);
 }
