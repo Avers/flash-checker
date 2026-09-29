@@ -1,0 +1,113 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04,     uring: "1" }
+          - { os: ubuntu-24.04-arm, uring: "1" }
+          - { os: macos-13,         uring: "0" }
+          - { os: macos-14,         uring: "0" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          make clean
+          make FLASHCHECK_IO_URING=${{ matrix.uring }}
+          make build/flashcheck-tests
+
+      - name: Test
+        run: ./build/flashcheck-tests
+
+      - name: Package
+        run: |
+          v=$(cat VERSION)
+          os=linux; [ "$RUNNER_OS" = "macOS" ] && os=macos
+          arch=$(uname -m)
+          case "$arch" in
+            x86_64) arch=x86_64 ;;
+            arm64)  arch=aarch64 ;;
+          esac
+          name="flashcheck-$v-$os-$arch"
+          mkdir -p "$name"
+          cp build/flashcheck LICENSE README.md "$name"/
+          cat > "$name/install.sh" <<'EOF'
+          #!/bin/sh
+          set -eu
+          dir="${DESTDIR:-/usr/local/bin}"
+          mkdir -p "$dir"
+          cd "$(dirname "$0")"
+          install -m755 flashcheck "$dir/flashcheck"
+          echo "installed $dir/flashcheck"
+          EOF
+          chmod +x "$name/install.sh"
+          tar czf "$name.tar.gz" "$name"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+          else
+            sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: |
+            flashcheck-*.tar.gz
+            flashcheck-*.tar.gz.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: binaries
+          merge-multiple: true
+
+      - name: Release notes
+        run: |
+          TAG="v$(cat VERSION)"
+          {
+            echo "Pre-built binaries — no sources, no build tools."
+            echo
+            echo "Verify a download with: \`shasum -a 256 -c <tarball>.sha256\`"
+            echo
+            awk -v tag="$TAG" '
+              $0 == "## [" tag "]" { found=1; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md
+          } > release-notes.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$(cat VERSION)"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            gh release create "$TAG" --target "$GITHUB_SHA" \
+              --title "flashcheck $TAG" --notes-file release-notes.md dist/*
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --draft \
+              --title "flashcheck $TAG (draft)" --notes-file release-notes.md dist/*
+          fi
