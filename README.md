@@ -2,7 +2,7 @@
 
 Detect USB flash devices that report more capacity than they really have.
 
-[![Build](https://github.com/flash-checker/flashcheck/workflows/CI/badge.svg)](https://github.com/flash-checker/flash-checker/actions)
+[![Build](https://github.com/Avers/flash-checker/badge.svg)](https://github.com/flash-checker/flash-checker/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 `flashcheck` writes unique, reproducible data directly to a raw block device and verifies it back. It detects controllers that map multiple logical addresses to the same physical storage (aliasing), discard old data when writing past real capacity (stale data), or simply never persist writes beyond their true limit.
