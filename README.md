@@ -22,7 +22,7 @@ Detect USB flash devices that report more capacity than they really have.
 
 ### Binary releases
 
-Pre-built tarballs for Linux (x86_64, aarch64) and macOS (Apple
+Pre-built tarballs for Linux (x86_64, aarch64) and macOS (Intel, Apple
 Silicon) are attached to every
 [GitHub Release](https://github.com/Avers/flashcheck/releases) — no sources
 and no build tools needed:
@@ -38,8 +38,7 @@ flashcheck --version
 Each tarball contains `flashcheck`, `LICENSE`, `README.md`, a portable
 `install.sh` (`DESTDIR=/opt/bin sudo ./install.sh` to choose the location)
 and a `.sha256` file. Linux builds need kernel 5.6+ for io_uring and fall
-back to the sync backend automatically on older kernels. (Intel macOS
-builds are paused while GitHub's `macos-13` runners are capacity-starved.)
+back to the sync backend automatically on older kernels.
 
 ### From source
 
