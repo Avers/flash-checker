@@ -20,6 +20,28 @@ Detect USB flash devices that report more capacity than they really have.
 
 ## Install
 
+### Binary releases
+
+Pre-built tarballs for Linux (x86_64, aarch64) and macOS (Intel, Apple
+Silicon) are attached to every
+[GitHub Release](https://github.com/Avers/flashcheck/releases) — no sources
+and no build tools needed:
+
+```sh
+curl -LO https://github.com/Avers/flashcheck/releases/download/v0.2.0/flashcheck-0.2.0-linux-x86_64.tar.gz
+shasum -a 256 -c flashcheck-0.2.0-linux-x86_64.tar.gz.sha256   # verify
+tar xzf flashcheck-0.2.0-linux-x86_64.tar.gz
+sudo ./flashcheck-0.2.0-linux-x86_64/install.sh               # → /usr/local/bin/flashcheck
+flashcheck --version
+```
+
+Each tarball contains `flashcheck`, `LICENSE`, `README.md`, a portable
+`install.sh` (`DESTDIR=/opt/bin sudo ./install.sh` to choose the location)
+and a `.sha256` file. Linux builds need kernel 5.6+ for io_uring and fall
+back to the sync backend automatically on older kernels.
+
+### From source
+
 ```sh
 make                     # build → build/flashcheck
 sudo make install        # install to /usr/local/bin/flashcheck
