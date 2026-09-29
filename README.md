@@ -4,7 +4,7 @@
 
 Detect USB flash devices that report more capacity than they really have.
 
-[![Build](https://github.com/Avers/flash-checker/badge.svg)](https://github.com/flash-checker/flash-checker/actions)
+[![Build](https://github.com/Avers/flash-checker/workflows/CI/badge.svg)](https://github.com/Avers/flash-checker/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 `flashcheck` writes unique, reproducible data directly to a raw block device and verifies it back. It detects controllers that map multiple logical addresses to the same physical storage (aliasing), discard old data when writing past real capacity (stale data), or simply never persist writes beyond their true limit.
@@ -26,7 +26,7 @@ Detect USB flash devices that report more capacity than they really have.
 
 Pre-built tarballs for Linux (x86_64, aarch64) and macOS (Intel, Apple
 Silicon) are attached to every
-[GitHub Release](https://github.com/Avers/flashcheck/releases) — no sources
+[GitHub Release](https://github.com/Avers/flash-checker/releases) — no sources
 and no build tools needed:
 
 ```sh
@@ -240,8 +240,7 @@ flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
 ├── docs/
-│   ├── design.md           # investigation & design document
-│   └── IMPLEMENTATION_PLAN.md # phased implementation plan
+│   └── design.md           # investigation & design document
 ├── include/flashcheck/     # public headers
 │   ├── common.h
 │   ├── config.h
