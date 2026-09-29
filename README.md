@@ -1,3 +1,5 @@
+<img src="badge.svg" width="72" alt="flashcheck logo">
+
 # flashcheck
 
 Detect USB flash devices that report more capacity than they really have.

@@ -1,28 +1,28 @@
-# Идеи оптимального выявления скам-флешки
+# Ideas for Optimal Detection of Scam Flash Drives
 
-## 1. Цель
+## 1. Goal
 
-Разработать Unix (MacOSX / Linux CLI-утилиту для проверки USB-флешки, которая заявляет больший объём памяти, чем реально установлено.
+Develop a Unix (MacOSX / Linux) CLI utility for checking a USB flash drive that claims more memory capacity than is actually installed.
 
-Основные задачи:
+Main objectives:
 
-- определить фактическую доступную ёмкость;
-- обнаружить повторное отображение разных LBA на одну физическую память;
-- обнаружить поведение контроллера при превышении реального объёма;
-- измерить скорость записи и чтения;
-- по возможности сделать тест существенно быстрее полного заполнения заявленного объёма;
-- поддержать **destructive mode**, при котором содержимое флешки полностью уничтожается.
+- determine the actual available capacity;
+- detect remapping of different LBAs to the same physical memory;
+- detect controller behavior when the real capacity is exceeded;
+- measure write and read speed;
+- if possible, make the test significantly faster than fully filling the claimed capacity;
+- support **destructive mode**, in which the contents of the flash drive are completely destroyed.
 
-> Важно: обычная файловая система не является частью теста. Работать желательно непосредственно с блочным устройством (`/dev/sdX`).
+> Important: the regular file system is not part of the test. It is preferable to work directly with the block device (`/dev/sdX`).
 
 ---
 
-## 2. Модель устройства
+## 2. Device Model
 
-Для Linux устройство выглядит примерно так:
+For Linux, the device looks approximately like this:
 
 ```text
-Программа
+Program
     |
     | read/write LBA
     v
@@ -32,7 +32,7 @@
 USB Mass Storage
     |
     v
-контроллер флешки
+flash drive controller
     |
     | FTL
     | wear leveling
@@ -42,55 +42,55 @@ USB Mass Storage
 NAND Flash
 ```
 
-Программа видит **логические блоки (LBA)**.
+The program sees **logical blocks (LBA)**.
 
-Контроллер самостоятельно решает, в какую физическую NAND-страницу записать данные.
+The controller independently decides which physical NAND page to write data to.
 
-Поэтому программа не должна пытаться определить физический адрес NAND напрямую.
+Therefore, the program should not attempt to directly determine the physical NAND address.
 
 ---
 
-## 3. Что делает поддельный контроллер
+## 3. What a Fake Controller Does
 
-Типичная схема дешёвой скам-флешки:
+Typical scheme of a cheap scam flash drive:
 
 ```text
-Реальная NAND:
+Real NAND:
     32 GB
 
-Контроллер сообщает:
+Controller reports:
     1 TB
 
-Linux видит:
-    1 TB логических LBA
+Linux sees:
+    1 TB of logical LBAs
 ```
 
-Контроллер может:
+The controller can:
 
-1. нормально работать в пределах реальной памяти;
-2. после заполнения реальной памяти:
-   - возвращать старые данные;
-   - повторно использовать одни и те же физические страницы;
-   - принимать запись, но фактически не сохранять её;
-   - возвращать ошибки;
-   - деградировать по скорости;
-   - использовать комбинацию этих механизмов.
+1. operate normally within the real memory;
+2. after the real memory is filled:
+   - return old data;
+   - reuse the same physical pages;
+   - accept writes but not actually save them;
+   - return errors;
+   - degrade in speed;
+   - use a combination of these mechanisms.
 
-Поэтому одного `lsblk` или чтения заявленного размера недостаточно.
+Therefore, a simple `lsblk` or reading the claimed size is not enough.
 
 ---
 
-# 4. Главная идея теста
+# 4. Main Test Idea
 
-Нужно проверить **уникальность содержимого разных логических областей после большого количества записей**.
+It is necessary to verify **the uniqueness of the contents of different logical regions after a large number of writes**.
 
-Ключевой принцип:
+Key principle:
 
-> Если два разных LBA после независимой записи возвращают одинаковое содержимое, хотя мы записывали туда разные данные, существует вероятность aliasing / повторного использования физической памяти.
+> If two different LBAs return the same content after independent writes, even though we wrote different data there, there is a likelihood of aliasing / reuse of physical memory.
 
-Однако простой тест двух адресов недостаточен.
+However, a simple two-address test is not sufficient.
 
-Например:
+For example:
 
 ```text
 LBA A <- pattern A
@@ -100,44 +100,44 @@ read A -> A
 read B -> B
 ```
 
-Это ещё не доказывает, что вся ёмкость настоящая.
+This does not yet prove that the entire capacity is genuine.
 
-Нужен тест, который заставляет контроллер реально поддерживать большое количество одновременно существующих уникальных данных.
+A test is needed that forces the controller to actually maintain a large amount of simultaneously existing unique data.
 
 ---
 
-# 5. Два режима тестирования
+# 5. Two Testing Modes
 
 ## 5.1 Fast / heuristic
 
-Цель — быстро обнаружить очевидную подделку.
+Goal — quickly detect obvious counterfeits.
 
-Не гарантирует доказательство настоящей ёмкости.
+Does not guarantee proof of genuine capacity.
 
-Использовать:
+Use:
 
-- большие блоки;
-- несколько областей;
-- уникальные patterns;
-- повторные проверки;
-- случайные и стратегически выбранные LBA.
+- large blocks;
+- several regions;
+- unique patterns;
+- repeated checks;
+- random and strategically chosen LBAs.
 
-Преимущество:
+Advantage:
 
-- значительно меньше записи;
-- быстро показывает большинство дешёвых подделок.
+- significantly fewer writes;
+- quickly reveals most cheap counterfeits.
 
-Недостаток:
+Disadvantage:
 
-- контроллер может случайно пройти такой тест.
+- the controller may randomly pass such a test.
 
 ---
 
 ## 5.2 Full destructive
 
-Цель — максимально надёжно проверить заявленный объём.
+Goal — verify the claimed capacity as reliably as possible.
 
-Алгоритм:
+Algorithm:
 
 ```text
 for each large region:
@@ -146,48 +146,48 @@ for each large region:
     verify region
 ```
 
-Или более эффективная схема:
+Or a more efficient scheme:
 
 ```text
-WRITE весь диапазон
+WRITE entire range
         |
         v
-READ весь диапазон
+READ entire range
         |
         v
 COMPARE
 ```
 
-При необходимости выполнять несколько проходов с разными patterns.
+If necessary, perform multiple passes with different patterns.
 
-Это наиболее надёжный вариант, но он требует записи всего заявленного объёма.
+This is the most reliable option, but it requires writing the entire claimed capacity.
 
 ---
 
-# 6. Почему нельзя просто записать нули
+# 6. Why You Shouldn't Just Write Zeros
 
-Плохой вариант:
+Bad option:
 
 ```text
 write zeros
 ```
 
-Причины:
+Reasons:
 
-- контроллер может оптимизировать повторяющиеся данные;
-- NAND может иметь внутренние механизмы компрессии;
-- одинаковый pattern плохо выявляет aliasing;
-- невозможно отличить некоторые виды повторного использования данных.
+- the controller may optimize repetitive data;
+- NAND may have internal compression mechanisms;
+- an identical pattern poorly detects aliasing;
+- it is impossible to distinguish some types of data reuse.
 
-Нужны **уникальные данные**.
+**Unique data** is needed.
 
 ---
 
 # 7. Patterns
 
-Каждый большой блок должен иметь уникальный идентификатор.
+Each large block must have a unique identifier.
 
-Например:
+For example:
 
 ```text
 struct TestBlockHeader {
@@ -199,26 +199,26 @@ struct TestBlockHeader {
 };
 ```
 
-Остальная часть блока заполняется детерминированным PRNG.
+The rest of the block is filled with a deterministic PRNG.
 
-Например:
+For example:
 
 ```text
 pattern = PRNG(seed = hash(test_id, lba))
 ```
 
-Преимущество:
+Advantage:
 
-- не нужно хранить весь записанный тестовый массив;
-- данные можно воспроизвести при проверке;
-- разные LBA получают разные patterns;
-- можно проверять данные потоково.
+- no need to store the entire written test array;
+- data can be reproduced during verification;
+- different LBAs receive different patterns;
+- data can be verified in a streaming fashion.
 
 ---
 
-# 8. Проверка aliasing
+# 8. Aliasing Check
 
-Особенно полезный тест:
+A particularly useful test:
 
 ```text
 LBA 0          <- pattern A
@@ -228,7 +228,7 @@ LBA 4 GB       <- pattern D
 ...
 ```
 
-После записи:
+After writing:
 
 ```text
 read LBA 0
@@ -237,7 +237,7 @@ read LBA 2 GB
 ...
 ```
 
-Если контроллер начинает возвращать:
+If the controller starts returning:
 
 ```text
 A
@@ -246,17 +246,17 @@ A
 A
 ```
 
-или данные начинают совпадать с более ранней областью — это сильный индикатор проблемы.
+or the data starts matching an earlier region — this is a strong indicator of a problem.
 
-Но тест должен быть многопроходным.
+But the test must be multi-pass.
 
 ---
 
-# 9. Sliding window
+# 9. Sliding Window
 
-Хороший компромисс между скоростью и надёжностью — **sliding window**.
+A good compromise between speed and reliability is the **sliding window**.
 
-Например:
+For example:
 
 ```text
 window = 1 GB
@@ -274,7 +274,7 @@ READ:
     region N
 ```
 
-Затем окно перемещается:
+Then the window moves:
 
 ```text
 [0 ........ 1 GB]
@@ -282,13 +282,13 @@ READ:
               [2 GB ........ 3 GB]
 ```
 
-Это позволяет заставлять FTL одновременно поддерживать множество уникальных данных.
+This forces the FTL to simultaneously maintain many unique data sets.
 
 ---
 
-# 10. Последовательный полный тест
+# 10. Sequential Full Test
 
-Для максимальной скорости предпочтительна последовательная работа:
+For maximum speed, sequential operation is preferable:
 
 ```text
 WRITE
@@ -298,27 +298,27 @@ READ
 0 -> end
 ```
 
-а не:
+rather than:
 
 ```text
 random write
 random read
 ```
 
-Причина:
+Reason:
 
-- USB лучше работает с большими последовательными передачами;
-- меньше overhead;
-- выше throughput;
-- проще измерять скорость.
+- USB works better with large sequential transfers;
+- less overhead;
+- higher throughput;
+- easier to measure speed.
 
 ---
 
-# 11. Размер блока
+# 11. Block Size
 
-Не работать с отдельными 512-byte секторами.
+Do not work with individual 512-byte sectors.
 
-Предлагаемый диапазон для экспериментов:
+Proposed range for experiments:
 
 ```text
 1 MiB
@@ -328,19 +328,19 @@ random read
 32 MiB
 ```
 
-Начальная реализация:
+Initial implementation:
 
 ```text
-block = 4 MiB или 8 MiB
+block = 4 MiB or 8 MiB
 ```
 
-Затем подобрать оптимальное значение экспериментально.
+Then select the optimal value experimentally.
 
 ---
 
 # 12. Linux API
 
-Основной уровень:
+Main level:
 
 ```c
 open()
@@ -349,49 +349,49 @@ pwrite()
 close()
 ```
 
-Для устройства:
+For the device:
 
 ```text
 /dev/sdX
 ```
 
-Полезные флаги:
+Useful flags:
 
 ```text
 O_RDWR
 O_DIRECT
 ```
 
-`O_DIRECT` следует сделать опциональным: некоторые USB Mass Storage устройства и конфигурации могут вести себя с ним хуже.
+`O_DIRECT` should be made optional: some USB Mass Storage devices and configurations may behave worse with it.
 
 ---
 
-# 13. Кэширование
+# 13. Caching
 
-Важно исключить ситуацию, когда тест фактически работает с RAM Linux, а не с флешкой.
+It is important to eliminate the situation where the test actually works with Linux RAM rather than the flash drive.
 
-Нужно продумать:
+Need to consider:
 
 ```text
 O_DIRECT
 ```
 
-и/или:
+and/or:
 
 ```text
 fsync()
 fdatasync()
 ```
 
-После записи критически важно обеспечить отправку данных ниже файлового/блочного кэша.
+After writing, it is critical to ensure that data is sent below the file/block cache.
 
-Для destructive raw-device теста предпочтительнее строить pipeline вокруг direct I/O и явно контролировать flush/barriers.
+For a destructive raw-device test, it is preferable to build a pipeline around direct I/O and explicitly control flush/barriers.
 
 ---
 
 # 14. io_uring
 
-Для последующей оптимизации можно добавить backend:
+For subsequent optimization, a backend can be added:
 
 ```text
 sync I/O
@@ -403,23 +403,23 @@ async I/O
     +-- io_uring
 ```
 
-Но первую реализацию лучше сделать на обычных `pread/pwrite`.
+But the first implementation is better done with regular `pread/pwrite`.
 
-Причина:
+Reason:
 
-- проще отладить;
-- проще доказать корректность;
-- USB-флешка обычно сама становится узким местом.
+- easier to debug;
+- easier to prove correctness;
+- the USB flash drive itself usually becomes the bottleneck.
 
-После этого можно измерить, есть ли реальный выигрыш от `io_uring`.
+After that, it can be measured whether `io_uring` provides a real benefit.
 
 ---
 
 # 15. Pipeline
 
-Для максимальной скорости запись не должна ждать завершения каждого отдельного блока.
+For maximum speed, writing should not wait for the completion of each individual block.
 
-Желаемая архитектура:
+Desired architecture:
 
 ```text
 Generator
@@ -434,7 +434,7 @@ Writer
 USB
 ```
 
-Для чтения:
+For reading:
 
 ```text
 USB
@@ -446,21 +446,21 @@ Reader
 Verifier
 ```
 
-Количество буферов:
+Number of buffers:
 
 ```text
 N = 4..16
 ```
 
-подбирается экспериментально.
+is selected experimentally.
 
 ---
 
-# 16. Проверка во время записи
+# 16. Verification During Writing
 
-Можно совмещать запись и проверку.
+Writing and verification can be combined.
 
-Например:
+For example:
 
 ```text
 write block 0
@@ -468,14 +468,14 @@ write block 1
 write block 2
 ...
 
-после заполнения окна:
+after filling the window:
 
 read block 0
 read block 1
 ...
 ```
 
-Получается:
+Result:
 
 ```text
        WRITE WINDOW
@@ -485,22 +485,22 @@ read block 1
               <---->
 ```
 
-Это уменьшает потребление RAM и позволяет раньше обнаружить ошибку.
+This reduces RAM consumption and allows detecting errors earlier.
 
 ---
 
-# 17. Важный тест после превышения реального объёма
+# 17. Important Test After Exceeding Real Capacity
 
-Если подозревается, например:
+If, for example, the following is suspected:
 
 ```text
 real = 32 GB
 reported = 1 TB
 ```
 
-нельзя просто остановиться после первых 32 GB.
+one cannot simply stop after the first 32 GB.
 
-Нужно продолжить:
+It is necessary to continue:
 
 ```text
 0 GB
@@ -513,19 +513,19 @@ reported = 1 TB
 ...
 ```
 
-и проверять, что ранее записанные данные остаются неизменными.
+and verify that previously written data remains unchanged.
 
-Ключевой момент:
+Key point:
 
-> Поддельный контроллер может принимать новые записи, но уничтожать ранее записанные данные.
+> A fake controller may accept new writes but destroy previously written data.
 
-Поэтому тест должен проверять **старые данные после записи новых данных**.
+Therefore, the test must verify **old data after writing new data**.
 
 ---
 
-# 18. Самый интересный алгоритм — retention / overwrite test
+# 18. The Most Interesting Algorithm — Retention / Overwrite Test
 
-Пример:
+Example:
 
 ```text
 A <- unique A
@@ -534,13 +534,13 @@ C <- unique C
 ...
 ```
 
-После заполнения некоторой области:
+After filling a certain region:
 
 ```text
-записать новые данные далеко за её пределами
+write new data far beyond its boundary
 ```
 
-Затем:
+Then:
 
 ```text
 read A
@@ -549,23 +549,23 @@ read C
 ...
 ```
 
-Если старые данные изменились:
+If old data has changed:
 
 ```text
 A_expected != A_actual
 ```
 
-получаем доказательство потери данных.
+we obtain proof of data loss.
 
-Это особенно важно для контроллеров, которые симулируют большой объём.
+This is especially important for controllers that simulate a large capacity.
 
 ---
 
-# 19. Поиск границы реальной ёмкости
+# 19. Finding the Real Capacity Boundary
 
-Можно автоматически искать момент деградации.
+The degradation point can be searched for automatically.
 
-Начать:
+Start:
 
 ```text
 8 GB
@@ -576,9 +576,9 @@ A_expected != A_actual
 ...
 ```
 
-После обнаружения ошибки выполнить бинарный поиск.
+After an error is detected, perform a binary search.
 
-Например:
+For example:
 
 ```text
 32 GB  -> OK
@@ -591,21 +591,21 @@ A_expected != A_actual
 ...
 ```
 
-Получаем приблизительную границу.
+We obtain an approximate boundary.
 
-Но:
+But:
 
-> Эта граница не обязательно равна физическому размеру NAND. Это фактически наблюдаемая надёжная логическая ёмкость устройства.
+> This boundary is not necessarily equal to the physical NAND size. It is the actually observed reliable logical capacity of the device.
 
 ---
 
-# 20. Adaptive test
+# 20. Adaptive Test
 
-Полезно сделать несколько стадий.
+It is useful to implement several stages.
 
 ### Stage 1 — Identify
 
-Получить:
+Obtain:
 
 ```text
 USB VID
@@ -618,7 +618,7 @@ logical block size
 physical block size
 ```
 
-Источники:
+Sources:
 
 ```text
 /sys/block/sdX/
@@ -630,16 +630,16 @@ SCSI inquiry
 
 ---
 
-### Stage 2 — Speed benchmark
+### Stage 2 — Speed Benchmark
 
-Измерить:
+Measure:
 
 ```text
 sequential write
 sequential read
 ```
 
-Например:
+For example:
 
 ```text
 write: 85 MB/s
@@ -648,48 +648,48 @@ read: 120 MB/s
 
 ---
 
-### Stage 3 — Sparse probe
+### Stage 3 — Sparse Probe
 
-Проверить большое количество LBA с уникальными patterns.
+Check a large number of LBAs with unique patterns.
 
 ---
 
 ### Stage 4 — Retention
 
-Проверять старые данные после записи новых областей.
+Verify old data after writing new regions.
 
 ---
 
-### Stage 5 — Full test
+### Stage 5 — Full Test
 
-При необходимости пройти весь заявленный объём.
+If necessary, pass through the entire claimed capacity.
 
 ---
 
-# 21. Не полагаться только на одинаковость блоков
+# 21. Don't Rely Only on Block Equality
 
-Обнаружение:
+Detection:
 
 ```text
 block A == block B
 ```
 
-само по себе не всегда является доказательством подделки.
+by itself is not always proof of counterfeiting.
 
-Например:
+For example:
 
-- данные могли случайно совпасть;
-- pattern мог быть одинаковым;
-- устройство могло корректно возвращать определённые данные;
-- контроллер может использовать дедупликацию/компрессию.
+- the data may have coincidentally matched;
+- the pattern may have been identical;
+- the device may correctly return certain data;
+- the controller may use deduplication/compression.
 
-Поэтому patterns должны быть криптографически или статистически различимыми.
+Therefore, patterns must be cryptographically or statistically distinguishable.
 
 ---
 
-# 22. Хороший pattern
+# 22. A Good Pattern
 
-Практический вариант:
+Practical option:
 
 ```text
 seed = SHA-256(
@@ -699,74 +699,74 @@ seed = SHA-256(
 )
 ```
 
-Затем:
+Then:
 
 ```text
-ChaCha20 / AES-CTR / хороший PRNG
+ChaCha20 / AES-CTR / a good PRNG
 ```
 
-генерирует поток данных.
+generates a data stream.
 
-Преимущество:
+Advantage:
 
-- практически исключает случайные совпадения;
-- данные воспроизводимы;
-- не требуется хранить исходные данные.
+- practically eliminates random coincidences;
+- data is reproducible;
+- no need to store the original data.
 
 ---
 
-# 23. Хэширование
+# 23. Hashing
 
-Можно дополнительно вычислять:
+Additionally, one can compute:
 
 ```text
 SHA-256(block)
 ```
 
-Но не обязательно делать SHA-256 каждого блока, если сравнение идёт непосредственно с детерминированным pattern.
+But it is not necessary to compute SHA-256 of every block if comparison is done directly against a deterministic pattern.
 
-Для скорости лучше:
+For speed, it is better:
 
 ```text
 generate expected data
 compare(buffer, expected)
 ```
 
-Хэширование можно оставить для:
+Hashing can be reserved for:
 
-- журнала;
-- диагностики;
-- итогового отчёта.
+- the log;
+- diagnostics;
+- the final report.
 
 ---
 
-# 24. Многопоточность
+# 24. Multithreading
 
-Не стоит сразу делать много потоков записи.
+It is not advisable to immediately create many write threads.
 
-Для USB-флешки:
+For a USB flash drive:
 
 ```text
 1 writer
 1 reader
 ```
 
-обычно является хорошей отправной точкой.
+is usually a good starting point.
 
-Слишком большое количество потоков может:
+Too many threads can:
 
-- увеличить overhead;
-- ухудшить последовательность;
-- вызвать внутреннюю garbage collection;
-- уменьшить скорость.
+- increase overhead;
+- worsen sequentiality;
+- trigger internal garbage collection;
+- reduce speed.
 
-Параллелизм лучше реализовать как pipeline с несколькими outstanding I/O, а не как десятки потоков.
+Parallelism is better implemented as a pipeline with multiple outstanding I/Os rather than dozens of threads.
 
 ---
 
-# 25. Измерение скорости
+# 25. Speed Measurement
 
-Для каждого этапа измерять:
+For each stage, measure:
 
 ```text
 bytes
@@ -775,7 +775,7 @@ MB/s
 MiB/s
 ```
 
-Также записывать:
+Also record:
 
 ```text
 min
@@ -783,13 +783,12 @@ max
 average
 ```
 
-и желательно скорость по временным интервалам.
+and preferably speed over time intervals.
 
-Особенно интересен график:
+A particularly interesting graph:
 
 ```text
 time
- ^
  |\
  | \
  |  \
@@ -797,15 +796,15 @@ time
  +----------------> written GB
 ```
 
-Резкое падение скорости после определённого объёма может быть диагностическим признаком.
+A sharp drop in speed after a certain volume may be a diagnostic sign.
 
-Но само по себе падение скорости **не доказывает**, что флешка поддельная: настоящие устройства тоже имеют SLC-cache, garbage collection и thermal throttling.
+But a speed drop by itself **does not prove** that the flash drive is counterfeit: genuine devices also have SLC cache, garbage collection, and thermal throttling.
 
 ---
 
-# 26. Контрольные точки
+# 26. Checkpoints
 
-Во время большого теста сохранять:
+During a large test, save:
 
 ```text
 checkpoint:
@@ -817,17 +816,17 @@ checkpoint:
     errors
 ```
 
-Это позволит:
+This will allow:
 
-- продолжить тест;
-- анализировать место первой ошибки;
-- строить графики.
+- resuming the test;
+- analyzing the location of the first error;
+- building graphs.
 
 ---
 
-# 27. Формат результата CLI
+# 27. CLI Result Format
 
-Например:
+For example:
 
 ```text
 flashcheck /dev/sdb --destructive --full
@@ -858,15 +857,15 @@ RESULT:
 
 ---
 
-# 28. Уровни результата
+# 28. Result Levels
 
-Не делать только:
+Don't output only:
 
 ```text
 SCAM / NOT SCAM
 ```
 
-Лучше выдавать фактические результаты:
+It is better to output factual results:
 
 ```text
 PASS
@@ -874,7 +873,7 @@ FAIL
 INCONCLUSIVE
 ```
 
-и отдельно:
+and separately:
 
 ```text
 reported capacity
@@ -885,39 +884,39 @@ I/O errors
 data mismatches
 ```
 
-Это позволит не делать ошибочных выводов.
+This will prevent erroneous conclusions.
 
 ---
 
-# 29. Важное ограничение
+# 29. Important Limitation
 
-Программа проверяет не непосредственно NAND-чип.
+The program does not directly test the NAND chip.
 
-Она проверяет:
+It tests:
 
-> способ, которым контроллер устройства предоставляет заявленное логическое адресное пространство и сохраняет данные.
+> the way the device controller provides the claimed logical address space and stores data.
 
-Поэтому возможны ситуации:
+Therefore, situations are possible where:
 
 ```text
 NAND = 64 GB
 reported = 64 GB
 ```
 
-и тест проходит.
+and the test passes.
 
-И:
+And:
 
 ```text
 NAND = 64 GB
 reported = 1 TB
 ```
 
-и тест обнаруживает повреждение после некоторого объёма.
+and the test detects corruption after a certain volume.
 
 ---
 
-# 30. Предлагаемая архитектура программы
+# 30. Proposed Program Architecture
 
 ```text
 flashcheck
@@ -958,16 +957,16 @@ flashcheck
 
 ---
 
-# 31. Приоритет реализации
+# 31. Implementation Priority
 
-### Версия 0.1
+### Version 0.1
 
-Сначала сделать максимально простую и проверяемую реализацию:
+First, make the simplest possible verifiable implementation:
 
 ```text
 open /dev/sdX
 ↓
-получить capacity
+get capacity
 ↓
 sequential write
 ↓
@@ -978,9 +977,9 @@ compare
 speed + errors
 ```
 
-### Версия 0.2
+### Version 0.2
 
-Добавить:
+Add:
 
 ```text
 unique deterministic patterns
@@ -989,9 +988,9 @@ sparse test
 capacity boundary search
 ```
 
-### Версия 0.3
+### Version 0.3
 
-Добавить:
+Add:
 
 ```text
 sliding window
@@ -1000,9 +999,9 @@ asynchronous I/O
 io_uring
 ```
 
-### Версия 0.4
+### Version 0.4
 
-Добавить:
+Add:
 
 ```text
 JSON output
@@ -1013,112 +1012,113 @@ automatic test selection
 
 ---
 
-# 32. Главный принцип оптимизации
+# 32. Main Optimization Principle
 
-Не пытаться сразу проверить весь 1 TB.
+Do not attempt to immediately verify the entire 1 TB.
 
-Сначала определить:
+First, determine:
 
 ```text
-"Может ли устройство корректно хранить несколько больших независимых областей?"
+"Can the device correctly store several large independent regions?"
 ```
 
-Если нет — подделка обнаружена быстро.
+If not — the counterfeit is detected quickly.
 
-Если да:
+If yes:
 
 ```text
-расширять диапазон
+expand the range
 ↓
-проверять retention
+verify retention
 ↓
-локализовать первую ошибку
+localize the first error
 ↓
-только при необходимости выполнять полный destructive test
+only if necessary, perform a full destructive test
 ```
 
-Таким образом можно получить:
+This way, one can obtain:
 
 ```text
-быстрый тест
+fast test
         +
-глубокий тест
+deep test
         +
-полный тест
+full test
 ```
 
-в одной программе.
+in a single program.
 
 ---
 
-# 33. Отдельно исследовать перед реализацией
+# 33. Investigate Separately Before Implementation
 
-Перед написанием оптимизированного backend желательно проверить:
+Before writing an optimized backend, it is advisable to verify:
 
-1. Как Linux сообщает размер USB Mass Storage.
-2. Как работают `BLKGETSIZE64` и связанные ioctl.
-3. Поведение `O_DIRECT` на USB flash.
-4. Влияние `fsync/fdatasync`.
+1. How Linux reports the size of USB Mass Storage.
+2. How `BLKGETSIZE64` and related ioctls work.
+3. The behavior of `O_DIRECT` on USB flash.
+4. The impact of `fsync/fdatasync`.
 5. SCSI `SYNCHRONIZE CACHE`.
-6. Максимальный размер I/O для конкретного устройства.
-7. Поведение `io_uring` с `/dev/sdX`.
-8. USB Bulk-Only Transport и/или UAS.
-9. Как отключить влияние файловой системы — работать только с raw block device.
-10. Как корректно определить, что устройство размонтировано перед destructive-тестом.
+6. The maximum I/O size for a specific device.
+7. The behavior of `io_uring` with `/dev/sdX`.
+8. USB Bulk-Only Transport and/or UAS.
+9. How to eliminate the influence of the file system — work only with the raw block device.
+10. How to correctly determine that the device is unmounted before a destructive test.
 
 ---
 
-# 34. Ключевая идея всей системы
+# 34. Key Idea of the Entire System
 
-Самая важная проверка должна выглядеть концептуально так:
+The most important check should conceptually look like this:
 
 ```text
-1. Записать уникальные данные в область A.
-2. Записать уникальные данные в область B.
-3. Записать уникальные данные в область C.
-4. Уйти далеко за предполагаемую реальную ёмкость.
-5. Вернуться к A/B/C.
-6. Проверить их.
-7. Повторять с расширением диапазона.
+1. Write unique data to region A.
+2. Write unique data to region B.
+3. Write unique data to region C.
+4. Go far beyond the assumed real capacity.
+5. Return to A/B/C.
+6. Verify them.
+7. Repeat with range expansion.
 ```
 
-Именно проверка **сохранности старых данных после записи новых данных** является одним из наиболее сильных способов обнаружить контроллер, который симулирует объём больше физической NAND.
+It is the verification of **preservation of old data after writing new data** that is one of the most powerful ways to detect a controller that simulates a capacity larger than the physical NAND.
 
 ---
 
-## Итоговая стратегия
+## Final Strategy
 
 ```text
-             ┌──────────────┐
-             │ Device info  │
-             └──────┬───────┘
-                    ↓
-             ┌──────────────┐
-             │ Speed test   │
-             └──────┬───────┘
-                    ↓
-             ┌──────────────┐
-             │ Sparse test  │
-             └──────┬───────┘
-                    ↓
-             ┌──────────────┐
-             │ Retention    │
-             └──────┬───────┘
-                    ↓
-          ┌─────────────────────┐
-          │ Failure detected?   │
-          └──────┬────────┬─────┘
-                 │ YES    │ NO
-                 ↓        ↓
-          estimate      extend
-          capacity      test
-                 │        │
-                 └───┬────┘
+              ┌──────────────┐
+              │ Device info  │
+              └──────┬───────┘
                      ↓
-             ┌──────────────┐
-             │ Full test    │
-             │ if required  │
-             └──────────────┘
+              ┌──────────────┐
+              │ Speed test   │
+              └──────┬───────┘
+                     ↓
+              ┌──────────────┐
+              │ Sparse test  │
+              └──────┬───────┘
+                     ↓
+              ┌──────────────┐
+              │ Retention    │
+              └──────┬───────┘
+                     ↓
+           ┌─────────────────────┐
+           │ Failure detected?   │
+           └──────┬────────┬─────┘
+                  │ YES    │ NO
+                  ↓        ↓
+           estimate      extend
+           capacity      test
+                  │        │
+                  └───┬────┘
+                      ↓
+              ┌──────────────┐
+              │ Full test    │
+              │ if required  │
+              └──────────────┘
 ```
 
-**Основная цель оптимизации:** минимизировать объём физической записи, необходимый для обнаружения несоответствия, но при этом не полагаться на один слабый тест. Для окончательной сертификации заявленного объёма всё равно нужен полный destructive write/read test.
+**Main optimization goal:** minimize the amount of physical writing necessary to detect a mismatch, but at the same time not rely on a single weak test. For final certification of the claimed capacity, a full destructive write/read test is still required.
+
