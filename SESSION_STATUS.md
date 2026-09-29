@@ -313,6 +313,32 @@ Environment: gcc 16.2, kernel `7.1.5+kali-amd64`, `/dev/sdc` = fake 1 TB stick
 
 ---
 
+## Round 8 — Binary Release Pipeline (PRs #17–#22)
+
+### What Landed
+
+| PR | Commit | Change |
+|----|--------|--------|
+| #17 | `6790936` | `.github/workflows/release.yml`: on a `v*` tag, build + test on Linux (x86_64, aarch64) and macOS, package `flashcheck-<v>-<os>-<arch>.tar.gz` (binary + LICENSE + README + portable `install.sh`) with a `.sha256` sidecar, publish to a GitHub Release; README "Binary releases" section |
+| #18 | `9bc8c38` | drop the `macos-13` row — the image was retired by GitHub on 2025-12-04, so the job could never start |
+| #20 | `a3086f3` | unique artifact names per matrix job — `upload-artifact@v4` does not merge same-named uploads, so the first release shipped with one tarball |
+| #21 | `10bd19b` | re-add Intel macOS |
+| #22 | `52abae4` | move the Intel row to `macos-15-intel` (macOS 15 — the last x86_64 image Actions will offer, until August 2027) |
+
+### v0.2.0 release
+
+Published: four tarballs (Linux x86_64/aarch64, macOS Intel/Apple Silicon)
++ `.sha256` files, verified end-to-end (download → checksum →
+`install.sh` → `flashcheck 0.2.0`). The repo is public, so the README's
+`curl | shasum -c | tar | install.sh` instructions work anonymously.
+
+### Known issues
+
+- Linux tarballs need glibc ≥ 2.38 (Ubuntu 24.04+, Debian 13+). An
+  `ubuntu-22.04` row and/or a musl static build would widen coverage.
+
+---
+
 ## Current Project Status
 
 ### Phase Completion
@@ -326,8 +352,8 @@ Environment: gcc 16.2, kernel `7.1.5+kali-amd64`, `/dev/sdc` = fake 1 TB stick
 
 | Priority | Task | Phase | Effort |
 |----------|------|-------|--------|
-| 1 | Tag and push `v0.2.0` (`git tag -a v0.2.0 && git push origin v0.2.0`) | — | Low |
-| 2 | Remove the temporary `/etc/sudoers.d/flashcheck` (developer action) | — | Low |
+| 1 | Remove the temporary `/etc/sudoers.d/flashcheck` (developer action) | — | Low |
+| 2 | Linux tarballs need glibc ≥ 2.38 — add an `ubuntu-22.04` row and/or a musl static build to cover Ubuntu 22.04 / Debian 12 and older | — | Low |
 | 3 | Read-ahead window is invalidated by `pipeline_write` only — a `--resume` run verifying ranges written by an earlier run starts with an empty window (correct today; worth a test) | Phase 3 | Low |
 
 Landed this session: bench subcommand (PR #3), macOS/Linux mount detection
@@ -335,7 +361,8 @@ Landed this session: bench subcommand (PR #3), macOS/Linux mount detection
 adaptive default (PR #7), io_uring SQE/CQE batching (PR #9), CI smoke fix
 (PR #10), real-hardware session + three fixes (Round 6), v0.2.0 release
 (PR #12), `make asan` gcc-16 fix (PR #13), `--identify` real serial (PR #14),
-sync `direct_active` honesty (PR #15).
+sync `direct_active` honesty (PR #15), binary release pipeline
+(PRs #17–#22).
 
 ### Known Follow-ups (io_uring)
 
