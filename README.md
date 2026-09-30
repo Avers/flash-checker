@@ -187,6 +187,26 @@ sudo ./build/flashcheck /dev/disk8s1 --destructive --dry-run --yes
 | Mount detection | `getfsstat()`; refuses to write while the disk or any of its partitions is mounted |
 | `diskutil` | Can be used to check device info before testing |
 
+### Gatekeeper
+
+macOS Gatekeeper may block the binary with *"cannot be opened because the developer cannot be verified"* or silently move it to Trash. Remove the quarantine attribute:
+
+```sh
+xattr -d com.apple.quarantine ./build/flashcheck
+```
+
+For installed releases:
+
+```sh
+xattr -d com.apple.quarantine /usr/local/bin/flashcheck
+```
+
+To check whether the attribute is present:
+
+```sh
+xattr ./build/flashcheck
+```
+
 ### Troubleshooting
 
 | Problem | Solution |
@@ -196,6 +216,7 @@ sudo ./build/flashcheck /dev/disk8s1 --destructive --dry-run --yes
 | `Permission denied` on `/dev/disk*` | Use `sudo` |
 | `device is mounted` | Run `sudo diskutil unmountDisk /dev/diskN` first |
 | `cannot determine capacity` | Device may not be a block device; check `diskutil list` |
+| Gatekeeper moves binary to Trash | Run `xattr -d com.apple.quarantine ./build/flashcheck` |
 
 ## Install
 
