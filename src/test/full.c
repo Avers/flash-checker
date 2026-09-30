@@ -2,6 +2,7 @@
 
 #include "flashcheck/checkpoint.h"
 #include "flashcheck/util.h"
+#include "flashcheck/visual.h"
 
 int stage_full(run_ctx *c, stage_report *r)
 {
@@ -23,14 +24,20 @@ int stage_full(run_ctx *c, stage_report *r)
     if (window_chunks == 0)
         window_chunks = 1;
 
-    log_out("");
-    if (resume > start && resume < end) {
-        log_out("Stage: resuming full verify at %s", (fmt_size(sz, sizeof sz, resume), sz));
+    if (!visual_is_enabled()) {
+        log_out("");
+        if (resume > start && resume < end) {
+            log_out("Stage: resuming full verify at %s",
+                    (fmt_size(sz, sizeof sz, resume), sz));
+            start = resume;
+        }
+        log_out("Stage: full destructive verify (%s window, %s pattern)",
+                (fmt_size(sz, sizeof sz, window_chunks * c->pl.chunk), sz),
+                pattern_kind_str(c->cfg->pattern));
+    } else if (resume > start && resume < end) {
         start = resume;
     }
-    log_out("Stage: full destructive verify (%s window, %s pattern)",
-            (fmt_size(sz, sizeof sz, window_chunks * c->pl.chunk), sz),
-            pattern_kind_str(c->cfg->pattern));
+    visual_stage_begin("full", start, end);
 
     for (off = start; off < end; off += window_chunks * c->pl.chunk) {
         uint64_t wend = FC_MIN(off + window_chunks * c->pl.chunk, end);
@@ -49,12 +56,19 @@ int stage_full(run_ctx *c, stage_report *r)
             if (o + c->pl.chunk < wend)
                 pipeline_prefetch(&c->pl, o + c->pl.chunk, 1);
             if (pipeline_verify(&c->pl, o, 1, &st) != 0) {
+                visual_mark(o, VISUAL_FAIL);
                 failed = 1;
                 break;
             }
             speed_mark(&rd, st.bytes_verified);
+            visual_mark(o, VISUAL_OK);
         }
-        stage_progress("verify", st.bytes_written, end - start, 0);
+        {
+            double bps = 0;
+            if (w.last_ms > w.start_ms)
+                bps = w.total_bytes / (double)(w.last_ms - w.start_ms) * 1000.0;
+            stage_progress("verify", st.bytes_written, end - start, bps);
+        }
         if (now_ms() - last_cp > 5000) {
             memset(&cp, 0, sizeof cp);
             snprintf(cp.stage, sizeof cp.stage, "full-verify");
@@ -69,6 +83,7 @@ int stage_full(run_ctx *c, stage_report *r)
         if (failed)
             break;
     }
+    visual_stage_end();
 
     stage_fill_speed(r, &w, &rd);
     r->regions_written = st.chunks_written;
@@ -101,6 +116,7 @@ int stage_full(run_ctx *c, stage_report *r)
     return 0;
 
 io_error:
+    visual_stage_end();
     r->io_errors = st.io_errors;
     r->has_first_fail = st.has_first_fail;
     r->first_fail_off = st.first_fail_off;

@@ -2,6 +2,57 @@
 
 #include "flashcheck/util.h"
 #include "flashcheck/common.h"
+#include "flashcheck/visual.h"
+
+static void print_visual_summary(const run_ctx *c, verdict v, uint64_t mism, uint64_t io_err)
+{
+    char rep[64], real[64], tst[64], map[VISUAL_MAP_STR], legend[64];
+    uint64_t first_fail = 0;
+    int have_fail = 0;
+
+    if (!visual_is_enabled())
+        return;
+    for (size_t i = 0; i < c->nst; i++) {
+        if (c->st[i].has_first_fail) {
+            first_fail = c->st[i].first_fail_off;
+            have_fail = 1;
+            break;
+        }
+    }
+    fmt_size(rep, sizeof rep, c->dev->capacity);
+    fmt_size(tst, sizeof tst, c->tested_bytes);
+    visual_map_render(visual_map_cells(), map, sizeof map);
+    visual_legend(legend, sizeof legend);
+    log_out("");
+    if (c->has_capacity) {
+        fmt_size(real, sizeof real, c->reliable_capacity);
+        log_out("Real size ~= >= %s (reported %s)", real, rep);
+    } else if (have_fail) {
+        fmt_size(real, sizeof real, first_fail);
+        log_out("Real size ~= < %s (reported %s)", real, rep);
+    } else {
+        uint64_t lo = ctx_start(c), hi = ctx_end(c);
+        char rs[64], re[64];
+        fmt_size(rs, sizeof rs, lo);
+        fmt_size(re, sizeof re, hi);
+        if (hi > lo && hi >= c->dev->capacity)
+            log_out("Real size ~= %s (reported %s, fully probed)", rep, rep);
+        else
+            log_out("Real size ~= >= %s..%s probed of %s reported", rs, re, rep);
+    }
+    if (have_fail) {
+        char ff[64];
+        fmt_size(ff, sizeof ff, first_fail);
+        log_out("  tested %s, %llu bad regions, first fail at %s, %llu I/O errors",
+                tst, (unsigned long long)mism, ff, (unsigned long long)io_err);
+    } else {
+        log_out("  tested %s, %llu bad regions, %llu I/O errors, verdict %s",
+                tst, (unsigned long long)mism, (unsigned long long)io_err,
+                verdict_str(v));
+    }
+    log_out("  map: %s", map);
+    log_out("        %s", legend);
+}
 
 static const char *short_desc(const run_ctx *c, verdict v, uint64_t mism)
 {
@@ -178,6 +229,22 @@ void report_console(const run_ctx *c, verdict v)
     char ev[512];
     uint64_t mism = 0, io_err = 0;
 
+    for (size_t i = 0; i < c->nst; i++) {
+        io_err += c->st[i].io_errors;
+        mism += c->st[i].chunks_failed;
+    }
+    /* Default easy mode: single live line is over — print the short
+       summary only (0.2.0 full detail lives behind -v/--verbose). */
+    if (visual_is_enabled() && c->cfg->mode != MODE_IDENTIFY) {
+        visual_finish();
+        fmt_size(b, sizeof b, c->tested_bytes);
+        log_out("RESULT: %s", verdict_str(v));
+        log_out("  %s", report_evidence(c, ev, sizeof ev));
+        print_short_result(c, v, mism);
+        print_visual_summary(c, v, mism, io_err);
+        return;
+    }
+
     for (size_t i = 0; i < c->nst; i++)
         print_stage(&c->st[i], c->pl.chunk);
 
@@ -190,10 +257,6 @@ void report_console(const run_ctx *c, verdict v)
     if (c->has_capacity) {
         fmt_size(r2, sizeof r2, c->reliable_capacity);
         log_out("  reliable capacity:   >= %s", r2);
-    }
-    for (size_t i = 0; i < c->nst; i++) {
-        io_err += c->st[i].io_errors;
-        mism += c->st[i].chunks_failed;
     }
     log_out("  mismatched regions:  %llu", (unsigned long long)mism);
     log_out("  I/O errors:          %llu", (unsigned long long)io_err);
@@ -244,6 +307,19 @@ void report_bench(const run_ctx *c)
     char a[64], b[64];
     uint64_t mism = 0, io_err = 0;
 
+    for (size_t i = 0; i < c->nst; i++) {
+        io_err += c->st[i].io_errors;
+        mism += c->st[i].chunks_failed;
+    }
+    if (visual_is_enabled()) {
+        visual_finish();
+        fmt_size(b, sizeof b, c->tested_bytes);
+        log_out("Benchmark: %s written, %s.", b,
+                io_err > 0 ? "I/O errors occurred" :
+                mism > 0 ? "read-back did not match" : "all data verified");
+        return;
+    }
+
     for (size_t i = 0; i < c->nst; i++)
         print_stage(&c->st[i], c->pl.chunk);
 
@@ -253,10 +329,6 @@ void report_bench(const run_ctx *c)
     log_out("  reported capacity:   %s", a);
     fmt_size(b, sizeof b, c->tested_bytes);
     log_out("  data written:        %s", b);
-    for (size_t i = 0; i < c->nst; i++) {
-        io_err += c->st[i].io_errors;
-        mism += c->st[i].chunks_failed;
-    }
     log_out("  mismatched regions:  %llu", (unsigned long long)mism);
     log_out("  I/O errors:          %llu", (unsigned long long)io_err);
     {

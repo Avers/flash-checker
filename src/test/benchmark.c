@@ -1,6 +1,7 @@
 #include "flashcheck/test.h"
 
 #include "flashcheck/util.h"
+#include "flashcheck/visual.h"
 
 int stage_benchmark(run_ctx *c, stage_report *r)
 {
@@ -17,8 +18,12 @@ int stage_benchmark(run_ctx *c, stage_report *r)
     speed_init(&rd);
 
     fmt_size(sz, sizeof sz, bend - start);
-    log_out("");
-    log_out("Stage: speed benchmark (%s, pattern %s)", sz, pattern_kind_str(c->cfg->pattern));
+    if (!visual_is_enabled()) {
+        log_out("");
+        log_out("Stage: speed benchmark (%s, pattern %s)", sz,
+                pattern_kind_str(c->cfg->pattern));
+    }
+    visual_stage_begin("benchmark", start, bend);
 
     bend = (bend / c->pl.chunk) * c->pl.chunk;
     if (bend <= start) {
@@ -34,22 +39,29 @@ int stage_benchmark(run_ctx *c, stage_report *r)
         if (pipeline_write(&c->pl, off, 0, &st) != 0)
             goto io_error;
         speed_mark(&w, st.bytes_written);
+        visual_mark(off, st.io_errors > 0 ? VISUAL_IOERR : VISUAL_OK);
         stage_progress("write", st.bytes_written, bend - start,
                        w.total_bytes / FC_MAX(w.last_ms - w.start_ms, 1) * 1000.0);
     }
     if (pipeline_flush(&c->pl, &st) != 0)
         goto io_error;
 
+    visual_stage_step(); /* read pass is its own numbered step */
     for (off = start; off < bend; off += c->pl.chunk) {
         if (off + c->pl.chunk < bend)
             pipeline_prefetch(&c->pl, off + c->pl.chunk, 0);
         if (pipeline_verify(&c->pl, off, 0, &st) != 0 && st.io_errors > 0)
             goto io_error;
         speed_mark(&rd, st.bytes_verified);
+        visual_mark(off, st.has_first_fail && st.first_fail_off == off ? VISUAL_FAIL
+                                                                       : VISUAL_OK);
         stage_progress("read", st.bytes_verified, bend - start,
                        rd.total_bytes / FC_MAX(rd.last_ms - rd.start_ms, 1) * 1000.0);
     }
 
+    visual_stage_end();
+    if (st.has_first_fail)
+        visual_mark(st.first_fail_off, VISUAL_FAIL);
     stage_fill_speed(r, &w, &rd);
     r->chunks_failed = st.chunks_failed;
     r->io_errors = st.io_errors;
@@ -62,6 +74,7 @@ int stage_benchmark(run_ctx *c, stage_report *r)
     return 0;
 
 io_error:
+    visual_stage_end();
     r->io_errors = st.io_errors;
     r->chunks_failed = st.chunks_failed;
     r->has_first_fail = st.has_first_fail;

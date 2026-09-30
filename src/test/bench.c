@@ -1,6 +1,7 @@
 #include "flashcheck/test.h"
 
 #include "flashcheck/util.h"
+#include "flashcheck/visual.h"
 
 int bench_run(run_ctx *c)
 {
@@ -17,11 +18,16 @@ int bench_run(run_ctx *c)
     speed_init(&w);
     speed_init(&rd);
 
+    visual_run_begin(2); /* bench-write, bench-read */
+
     bend = (bend / c->pl.chunk) * c->pl.chunk;
     fmt_size(sz, sizeof sz, bend > start ? bend - start : 0);
-    log_out("");
-    log_out("Stage: device speed benchmark (%s, pattern %s)", sz,
-            pattern_kind_str(c->cfg->pattern));
+    if (!visual_is_enabled()) {
+        log_out("");
+        log_out("Stage: device speed benchmark (%s, pattern %s)", sz,
+                pattern_kind_str(c->cfg->pattern));
+    }
+    visual_stage_begin("bench", start, bend);
 
     if (bend <= start) {
         speed_free(&w);
@@ -36,22 +42,29 @@ int bench_run(run_ctx *c)
         if (pipeline_write(&c->pl, off, 0, &st) != 0)
             goto io_error;
         speed_mark(&w, st.bytes_written);
+        visual_mark(off, VISUAL_OK);
         stage_progress("write", st.bytes_written, bend - start,
                        w.total_bytes / FC_MAX(w.last_ms - w.start_ms, 1) * 1000.0);
     }
     if (pipeline_flush(&c->pl, &st) != 0)
         goto io_error;
 
+    visual_stage_step(); /* read pass is its own numbered step */
     for (off = start; off < bend; off += c->pl.chunk) {
         if (off + c->pl.chunk < bend)
             pipeline_prefetch(&c->pl, off + c->pl.chunk, 0);
         if (pipeline_verify(&c->pl, off, 0, &st) != 0 && st.io_errors > 0)
             goto io_error;
         speed_mark(&rd, st.bytes_verified);
+        visual_mark(off, st.has_first_fail && st.first_fail_off == off ? VISUAL_FAIL
+                                                                       : VISUAL_OK);
         stage_progress("read", st.bytes_verified, bend - start,
                        rd.total_bytes / FC_MAX(rd.last_ms - rd.start_ms, 1) * 1000.0);
     }
 
+    visual_stage_end();
+    if (st.has_first_fail)
+        visual_mark(st.first_fail_off, VISUAL_FAIL);
     stage_fill_speed(r, &w, &rd);
     r->chunks_failed = st.chunks_failed;
     r->bad_bytes = st.bad_bytes;
@@ -69,6 +82,7 @@ int bench_run(run_ctx *c)
     return 0;
 
 io_error:
+    visual_stage_end();
     r->io_errors = st.io_errors;
     r->chunks_failed = st.chunks_failed;
     r->has_first_fail = st.has_first_fail;
