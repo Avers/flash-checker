@@ -1,6 +1,7 @@
 #include "flashcheck/test.h"
 
 #include "flashcheck/util.h"
+#include "flashcheck/visual.h"
 
 int stage_sparse(run_ctx *c, stage_report *r)
 {
@@ -25,11 +26,16 @@ int stage_sparse(run_ctx *c, stage_report *r)
     }
     fmt_size(a, sizeof a, start);
     fmt_size(b, sizeof b, end);
-    log_out("");
-    log_out("Stage: sparse probe (%llu regions, %s .. %s)", (unsigned long long)n, a, b);
+    if (!visual_is_enabled()) {
+        log_out("");
+        log_out("Stage: sparse probe (%llu regions, %s .. %s)", (unsigned long long)n, a, b);
+    }
+    visual_stage_begin("sparse", start, end);
 
     for (i = 0; i < n; i++) {
         if (pipeline_write(&c->pl, probes[i], 0, &st) != 0) {
+            visual_mark(probes[i], VISUAL_IOERR);
+            visual_stage_end();
             r->io_errors = st.io_errors;
             snprintf(r->note, sizeof r->note, "I/O error writing probe");
             speed_free(&w);
@@ -37,6 +43,9 @@ int stage_sparse(run_ctx *c, stage_report *r)
             return -1;
         }
         speed_mark(&w, st.bytes_written);
+        visual_mark(probes[i], VISUAL_OK);
+        if (visual_is_enabled())
+            visual_update_count("probe", i + 1, n);
     }
     if (pipeline_flush(&c->pl, &st) != 0) {
         r->io_errors = ++st.io_errors;
@@ -49,6 +58,9 @@ int stage_sparse(run_ctx *c, stage_report *r)
     speed_init(&rd);
     failed = pipeline_verify_offsets(&c->pl, probes, (size_t)n, 0, &st, 0);
     speed_mark(&rd, st.bytes_verified);
+    visual_stage_end();
+    if (st.has_first_fail)
+        visual_mark(st.first_fail_off, VISUAL_FAIL);
 
     stage_fill_speed(r, &w, &rd);
     r->bytes_written = st.bytes_written;

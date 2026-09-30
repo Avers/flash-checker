@@ -8,6 +8,7 @@
 #include "flashcheck/safety.h"
 #include "flashcheck/test.h"
 #include "flashcheck/util.h"
+#include "flashcheck/visual.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -72,8 +73,12 @@ int main(int argc, char **argv)
         cli_usage(stderr, FC_PROG);
         return EXIT_USAGE;
     }
+    /* Default (no -v): easy mode — one live progress line + short summary.
+       Verbose (-v): full 0.2.0 detail (stages, rates, summary). */
     if (cfg.verbose > 0)
         log_set_level(LOG_VERBOSE);
+    else
+        visual_set_enabled(1);
     if (config_validate(&cfg, err, sizeof err) != 0) {
         log_err("%s", err);
         return EXIT_USAGE;

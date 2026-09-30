@@ -6,6 +6,7 @@ void test_io_and_detection(void);
 void test_uring(void);
 void test_sync(void);
 void test_pool(void);
+void test_visual(void);
 
 int main(void)
 {
@@ -16,5 +17,6 @@ int main(void)
     test_uring();
     test_sync();
     test_pool();
+    test_visual();
     return test_summary();
 }
