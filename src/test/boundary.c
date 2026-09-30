@@ -1,6 +1,7 @@
 #include "flashcheck/test.h"
 
 #include "flashcheck/util.h"
+#include "flashcheck/visual.h"
 
 typedef struct {
     run_ctx *c;
@@ -85,10 +86,13 @@ int stage_boundary(run_ctx *c, stage_report *r)
     speed_init(&b.w);
     speed_init(&b.rd);
 
-    log_out("");
-    log_out("Stage: reliable capacity search (budget %s, resolution %s)",
-            (fmt_size(sz, sizeof sz, budget), sz),
-            (fmt_size(sz2, sizeof sz2, c->cfg->boundary_resolution), sz2));
+    if (!visual_is_enabled()) {
+        log_out("");
+        log_out("Stage: reliable capacity search (budget %s, resolution %s)",
+                (fmt_size(sz, sizeof sz, budget), sz),
+                (fmt_size(sz2, sizeof sz2, c->cfg->boundary_resolution), sz2));
+    }
+    visual_stage_begin("boundary", 0, end);
 
     for (;;) {
         if (x > end) {
@@ -96,18 +100,25 @@ int stage_boundary(run_ctx *c, stage_report *r)
                 hi = end;
             break;
         }
-        log_out("  probing %s ...", (fmt_size(sz, sizeof sz, x), sz));
+        if (!visual_is_enabled())
+            log_out("  probing %s ...", (fmt_size(sz, sizeof sz, x), sz));
+        else
+            visual_update("probe", spent, budget, 0);
         if (spent + 2 * x > budget) {
             log_warn("boundary search stopped: budget exhausted");
             break;
         }
         if (probe_ok(&b, x)) {
+            visual_mark(x, VISUAL_OK);
             lo = x;
             spent += 2 * x;
+            if (visual_is_enabled())
+                visual_update("probe", spent, budget, 0);
             if (x > end / 2)
                 break;
             x *= 2;
         } else {
+            visual_mark(x, VISUAL_FAIL);
             hi = x;
             have_fail = 1;
             break;
@@ -122,14 +133,21 @@ int stage_boundary(run_ctx *c, stage_report *r)
                 log_warn("boundary bisection stopped: budget exhausted");
                 break;
             }
-            log_out("  bisect %s ...", (fmt_size(sz, sizeof sz, mid), sz));
-            if (probe_ok(&b, mid))
+            if (!visual_is_enabled())
+                log_out("  bisect %s ...", (fmt_size(sz, sizeof sz, mid), sz));
+            if (probe_ok(&b, mid)) {
+                visual_mark(mid, VISUAL_OK);
                 lo = mid;
-            else
+            } else {
+                visual_mark(mid, VISUAL_FAIL);
                 hi = mid;
+            }
             spent += 2 * mid;
+            if (visual_is_enabled())
+                visual_update("probe", spent, budget, 0);
         }
     }
+    visual_stage_end();
 
     r->bytes_written = b.st.bytes_written;
     r->bytes_verified = b.st.bytes_verified;

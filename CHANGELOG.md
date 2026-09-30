@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-30
+
+### Added
+- Easy default output for general users: a single live `[██░░]` progress
+  line for the whole session with a `[i/N]` step counter (bench-write,
+  bench-read, sparse, retention, boundary, full-verify; quick=3,
+  standard=5, adaptive/full=6 steps), plus a short result
+  (`Real size ~= ...`,
+  64-cell block map (░ untested, █ ok, # fail, ? io-error)
+
+### Changed
+- `-v/--verbose` now selects the full 0.2.0-style detail (per-stage
+  headers, rates, summary); without it only the progress line and the
+  short result are shown
+- Full-verify progress now reports the real write rate instead of `0.00 B/s`
+
 ## [0.2.0] - 2026-09-28
 
 ### Added

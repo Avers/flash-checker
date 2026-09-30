@@ -1,6 +1,7 @@
 #include "flashcheck/test.h"
 
 #include "flashcheck/util.h"
+#include "flashcheck/visual.h"
 
 static uint64_t g_last_progress;
 
@@ -25,6 +26,10 @@ void stage_progress(const char *label, uint64_t done, uint64_t total, double bps
     uint64_t now = now_ms();
     char a[64], b[64], r[64];
 
+    if (visual_is_enabled()) {
+        visual_update(label, done, total, bps);
+        return;
+    }
     if (now - g_last_progress < 2000)
         return;
     g_last_progress = now;
@@ -85,6 +90,22 @@ int run_execute(run_ctx *c)
     run_mode m = c->cfg->mode;
     stage_report *r;
 
+    switch (m) {
+    case MODE_QUICK:
+        visual_run_begin(3); /* bench-write, bench-read, sparse */
+        break;
+    case MODE_STANDARD:
+        visual_run_begin(5); /* + retention-fill, boundary-probe */
+        break;
+    case MODE_ADAPTIVE:
+    case MODE_FULL:
+        visual_run_begin(6); /* + full-verify */
+        break;
+    default:
+        visual_run_begin(0); /* identify: no progress */
+        break;
+    }
+
     r = stage_new(c, "identify");
     stage_identify(c, r);
 
@@ -122,7 +143,7 @@ int run_execute(run_ctx *c)
     if (r->chunks_failed > 0 || m == MODE_STANDARD)
         return 0;
 
-    if (m == MODE_ADAPTIVE)
+    if (m == MODE_ADAPTIVE && !visual_is_enabled())
         log_out("no counter-evidence from probe, retention and capacity search; "
                 "escalating to full write/read verify (use --mode standard to stop here)");
 

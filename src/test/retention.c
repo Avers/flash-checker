@@ -1,6 +1,7 @@
 #include "flashcheck/test.h"
 
 #include "flashcheck/util.h"
+#include "flashcheck/visual.h"
 
 int stage_retention(run_ctx *c, stage_report *r)
 {
@@ -26,16 +27,21 @@ int stage_retention(run_ctx *c, stage_report *r)
     }
     fill_end = (end / c->pl.chunk) * c->pl.chunk;
 
-    log_out("");
-    log_out("Stage: retention (old data must survive writes past it)");
-    log_out("  %llu anchor regions, write-only fill over %s",
-            (unsigned long long)n_anchors, (fmt_size(sz, sizeof sz, fill_end - start), sz));
+    if (!visual_is_enabled()) {
+        log_out("");
+        log_out("Stage: retention (old data must survive writes past it)");
+        log_out("  %llu anchor regions, write-only fill over %s", (unsigned long long)n_anchors,
+                (fmt_size(sz, sizeof sz, fill_end - start), sz));
+    }
+    visual_stage_begin("retention", start, fill_end);
 
     for (pass = 0; pass < c->cfg->passes && !failed; pass++) {
         uint32_t p = (uint32_t)(pass + 1);
 
         for (off = 0; off < n_anchors; off++) {
             if (pipeline_write(&c->pl, anchors[off], p, &st) != 0) {
+                visual_mark(anchors[off], VISUAL_IOERR);
+                visual_stage_end();
                 r->io_errors = st.io_errors;
                 snprintf(r->note, sizeof r->note, "I/O error writing anchor");
                 speed_free(&w);
@@ -43,6 +49,7 @@ int stage_retention(run_ctx *c, stage_report *r)
                 return -1;
             }
             speed_mark(&w, st.bytes_written);
+            visual_mark(anchors[off], VISUAL_OK);
         }
         if (pipeline_flush(&c->pl, &st) != 0) {
             r->io_errors = ++st.io_errors;
@@ -65,6 +72,8 @@ int stage_retention(run_ctx *c, stage_report *r)
             if (is_anchor)
                 continue;
             if (pipeline_write(&c->pl, off, (uint32_t)(pass + 1000), &st) != 0) {
+                visual_mark(off, VISUAL_IOERR);
+                visual_stage_end();
                 r->io_errors = st.io_errors;
                 snprintf(r->note, sizeof r->note, "I/O error during fill");
                 speed_free(&w);
@@ -72,6 +81,7 @@ int stage_retention(run_ctx *c, stage_report *r)
                 return -1;
             }
             speed_mark(&w, st.bytes_written);
+            visual_mark(off, VISUAL_OK);
             stage_progress("fill", st.bytes_written, (fill_end - start) * c->cfg->passes,
                            w.total_bytes / FC_MAX(w.last_ms - w.start_ms, 1) * 1000.0);
         }
@@ -85,6 +95,9 @@ int stage_retention(run_ctx *c, stage_report *r)
             failed = 1;
         speed_mark(&rd, st.bytes_verified);
     }
+    visual_stage_end();
+    if (st.has_first_fail)
+        visual_mark(st.first_fail_off, VISUAL_FAIL);
     stage_fill_speed(r, &w, &rd);
     r->bytes_written = st.bytes_written;
     r->bytes_verified = st.bytes_verified;
