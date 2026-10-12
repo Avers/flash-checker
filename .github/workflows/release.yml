@@ -32,8 +32,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-${{ matrix.cross }}
 
+      - name: Set CC
+        id: cc
+        run: |
+          if [ -n "${{ matrix.cross }}" ]; then
+            echo "cc=${{ matrix.cross }}-cc" >> "$GITHUB_OUTPUT"
+          else
+            echo "cc=cc" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build
-        run: make clean && make CC="${{ matrix.cross && matrix.cross + '-cc' || 'cc' }}"
+        run: make clean && make CC="${{ steps.cc.outputs.cc }}"
 
       - name: Package
         run: |
