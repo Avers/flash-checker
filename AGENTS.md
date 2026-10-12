@@ -63,6 +63,19 @@ flashcheck writes to raw block devices (`/dev/disk*`). Never:
 - Run `--destructive` mode without approval
 - Modify or write to `/dev/` paths
 
+## Release Checklist
+
+Before tagging a release, verify:
+1. `make clean && make` passes
+2. `make test` passes (all checks green)
+3. `CHANGELOG.md` has an entry for the new version
+4. `VERSION` matches the tag (use `make bump part=patch|minor|major`)
+5. The tag is pushed to origin (`git push origin vX.Y.Z`)
+6. GitHub Actions workflow runs successfully (check `gh run list --workflow=release.yml`)
+7. Release has all 8 assets (4 platforms x tar.gz + sha256)
+
+**Never** modify `.github/workflows/release.yml` without understanding the full matrix (Linux x86_64/arm64 with `FLASHCHECK_IO_URING=1`, macOS x86_64/arm64 with `=0`). The workflow must run tests before packaging and include `LICENSE`, `README.md`, and `install.sh` in each tarball.
+
 ## Summary
 
 > **No commit, no push, no merge without developer approval.**
