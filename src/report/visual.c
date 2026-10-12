@@ -11,6 +11,7 @@ static uint64_t g_end = 0;
 static uint64_t g_last_draw = 0;
 static int g_stage_idx = 0;
 static int g_stage_total = 0;
+static int g_line_open = 0;
 
 void visual_set_enabled(int on) { g_visual = on ? 1 : 0; }
 int visual_is_enabled(void) { return g_visual; }
@@ -58,12 +59,20 @@ void visual_stage_end(void)
     g_last_draw = 0;
 }
 
+void visual_break_line(void)
+{
+    if (!g_line_open)
+        return;
+    g_line_open = 0;
+    fputc('\n', stdout);
+    fflush(stdout);
+}
+
 void visual_finish(void)
 {
     if (!g_visual)
         return;
-    if (isatty(STDOUT_FILENO))
-        fputc('\n', stdout);
+    visual_break_line();
     fflush(stdout);
 }
 
@@ -174,10 +183,13 @@ void visual_update(const char *label, uint64_t done, uint64_t total, double bps)
     stage_tag(tag, sizeof tag);
 
     tty = isatty(STDOUT_FILENO);
-    if (tty)
+    if (tty) {
         fprintf(stdout, "\r  %s%s %s %3d%% %s/%s %s", tag, label, bar, pct, a, b, r);
-    else
+        g_line_open = 1;
+    } else {
         fprintf(stdout, "  %s%s %s %3d%% %s/%s %s\n", tag, label, bar, pct, a, b, r);
+        g_line_open = 0;
+    }
     fflush(stdout);
 }
 
@@ -200,11 +212,14 @@ void visual_update_count(const char *label, uint64_t done, uint64_t total)
     stage_tag(tag, sizeof tag);
 
     tty = isatty(STDOUT_FILENO);
-    if (tty)
+    if (tty) {
         fprintf(stdout, "\r  %s%s %s %3d%% %llu/%llu", tag, label, bar, pct,
                 (unsigned long long)done, (unsigned long long)total);
-    else
+        g_line_open = 1;
+    } else {
         fprintf(stdout, "  %s%s %s %3d%% %llu/%llu\n", tag, label, bar, pct,
                 (unsigned long long)done, (unsigned long long)total);
+        g_line_open = 0;
+    }
     fflush(stdout);
 }

@@ -1,5 +1,7 @@
 #include "flashcheck/util.h"
 
+#include "flashcheck/visual.h"
+
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -25,6 +27,7 @@ log_level log_get_level(void) { return g_level; }
 
 static void vlog(FILE *f, const char *prefix, const char *fmt, va_list ap)
 {
+    visual_break_line();
     fprintf(f, "%s", prefix);
     vfprintf(f, fmt != NULL ? fmt : "", ap);
     fputc('\n', f);
