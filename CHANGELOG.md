@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-10-12
+
+### Added
+- `-i`/`--identify` without a device lists all accessible block devices
+  (scans `/sys/block` on Linux, prints `diskutil list` hint on macOS;
+  documented under 0.3.1, first included in a published release here)
+
+### Fixed
+- Warnings no longer overrun the live progress bar
+  (`...0.00 Bflashcheck: warning: ...`): the progress line is closed
+  before any log line is written
+- Capacity-search budget messages now explain what stopped, what the
+  result means and how to raise `--boundary-budget`; a budget too small
+  for the first probe reports "not estimated" instead of the meaningless
+  `reliable capacity >= 0.00 B`
+- Stage note for the capacity search now reads
+  `reliable capacity >= X (Y of Z I/O budget used)`
+
+## [0.3.3] - 2026-10-12
+
+### Fixed
+- CI release workflow: restored the proven 0.2.0/0.3.0 workflow that builds
+  4 platforms, runs tests, packages LICENSE/README/install.sh, and extracts
+  release notes from CHANGELOG.md
+
+## [0.3.2] - 2026-10-12
+
+### Fixed
+- CI release workflow: use step output for CC instead of inline expression
+  that failed when `matrix.cross` was undefined
+
 ## [0.3.1] - 2026-10-12
 
 ### Added
