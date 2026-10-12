@@ -74,13 +74,14 @@ int stage_boundary(run_ctx *c, stage_report *r)
     uint64_t x = chunk * 8;
     uint64_t lo = 0, hi = 0;
     int have_fail = 0;
-    char sz[64], sz2[64];
+    int budget_stop = 0;
+    char sz[64], sz2[64], sz3[64], sz4[64];
 
     memset(&b, 0, sizeof b);
     b.c = c;
     stage_stats_reset(&b.st);
     if (end < chunk * 16) {
-        snprintf(r->note, sizeof r->note, "skipped: range too small for boundary search");
+        snprintf(r->note, sizeof r->note, "capacity search skipped: the tested range is too small to probe");
         return 0;
     }
     speed_init(&b.w);
@@ -105,7 +106,20 @@ int stage_boundary(run_ctx *c, stage_report *r)
         else
             visual_update("probe", spent, budget, 0);
         if (spent + 2 * x > budget) {
-            log_warn("boundary search stopped: budget exhausted");
+            budget_stop = 1;
+            if (lo == 0)
+                log_warn("capacity search could not start: the first probe needs %s but "
+                         "--boundary-budget is only %s - raise the budget to estimate "
+                         "the reliable capacity",
+                         (fmt_size(sz, sizeof sz, 2 * x), sz),
+                         (fmt_size(sz2, sizeof sz2, budget), sz2));
+            else
+                log_warn("capacity search stopped early: the next probe needs more I/O than "
+                         "the remaining budget allows (%s spent of %s). Reliable capacity is "
+                         "at least %s - raise --boundary-budget for a more precise result",
+                         (fmt_size(sz, sizeof sz, spent), sz),
+                         (fmt_size(sz2, sizeof sz2, budget), sz2),
+                         (fmt_size(sz3, sizeof sz3, lo), sz3));
             break;
         }
         if (probe_ok(&b, x)) {
@@ -130,7 +144,14 @@ int stage_boundary(run_ctx *c, stage_report *r)
         while (hi - lo > res) {
             uint64_t mid = lo + (hi - lo) / 2;
             if (spent + 2 * mid > budget) {
-                log_warn("boundary bisection stopped: budget exhausted");
+                budget_stop = 1;
+                log_warn("capacity search stopped early: the next probe needs more I/O than "
+                         "the remaining budget allows (%s spent of %s). Reliable capacity is "
+                         "between %s and %s - raise --boundary-budget for a finer result",
+                         (fmt_size(sz, sizeof sz, spent), sz),
+                         (fmt_size(sz2, sizeof sz2, budget), sz2),
+                         (fmt_size(sz3, sizeof sz3, lo), sz3),
+                         (fmt_size(sz4, sizeof sz4, hi), sz4));
                 break;
             }
             if (!visual_is_enabled())
@@ -168,8 +189,18 @@ int stage_boundary(run_ctx *c, stage_report *r)
     speed_free(&b.w);
     speed_free(&b.rd);
     r->reliable_capacity = lo;
-    r->has_capacity = 1;
-    snprintf(r->note, sizeof r->note, "reliable capacity >= %s (%s spent of budget)",
-             (fmt_size(sz, sizeof sz, lo), sz), (fmt_size(sz2, sizeof sz2, spent), sz2));
+    if (budget_stop && lo == 0) {
+        r->has_capacity = 0;
+        snprintf(r->note, sizeof r->note,
+                 "not estimated: --boundary-budget %.16s is too small for the first probe",
+                 (fmt_size(sz, sizeof sz, budget), sz));
+    } else {
+        r->has_capacity = 1;
+        snprintf(r->note, sizeof r->note,
+                 "reliable capacity >= %.16s (%.16s of %.16s I/O budget used)",
+                 (fmt_size(sz, sizeof sz, lo), sz),
+                 (fmt_size(sz2, sizeof sz2, spent), sz2),
+                 (fmt_size(sz3, sizeof sz3, budget), sz3));
+    }
     return 0;
 }

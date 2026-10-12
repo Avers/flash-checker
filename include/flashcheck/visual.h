@@ -44,6 +44,10 @@ void visual_update_count(const char *label, uint64_t done, uint64_t total);
 /* End the single live line before printing the final summary. */
 void visual_finish(void);
 
+/* Terminate the live progress line (if one is open) so that a log line
+   written to stderr starts on its own line instead of overrunning the bar. */
+void visual_break_line(void);
+
 /* Pure helpers, unit-testable (no I/O, no globals). */
 void visual_bar(char *buf, size_t n, uint64_t done, uint64_t total, int width);
 int visual_map_index(uint64_t off, uint64_t start, uint64_t end);
