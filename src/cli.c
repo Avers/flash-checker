@@ -307,7 +307,7 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
         snprintf(err, errn, "unexpected extra argument: '%s'", argv[optind]);
         return CLI_ERROR;
     }
-    if (c->device == NULL && c->self_test < 0) {
+    if (c->device == NULL && c->self_test < 0 && c->mode != MODE_IDENTIFY) {
         snprintf(err, errn, "no device given (try --help)");
         return CLI_ERROR;
     }

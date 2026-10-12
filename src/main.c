@@ -92,6 +92,11 @@ int main(int argc, char **argv)
         return EXIT_USAGE;
     }
 
+    if (cfg.mode == MODE_IDENTIFY && cfg.device == NULL && cfg.self_test < 0) {
+        list_devices();
+        return EXIT_OK;
+    }
+
     fc_install_signal_handlers();
 
     if (cfg.self_test >= 0) {

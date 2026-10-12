@@ -26,5 +26,6 @@ int device_probe(const char *path, device_info *out, char *err, size_t errn);
 const char *device_basename(const char *path);
 void device_print_info(const device_info *d);
 void device_json(const device_info *d, void *ctx, int indent);
+int list_devices(void);
 
 #endif

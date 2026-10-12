@@ -1,5 +1,6 @@
 #include "flashcheck/device.h"
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <sys/ioctl.h>
@@ -240,4 +241,51 @@ void device_json(const device_info *d, void *ctx, int indent)
             (unsigned long long)d->capacity);
     fprintf(o, "%*s  \"reported_capacity\": \"%s\"\n", indent, "", cap);
     fprintf(o, "%*s}", indent, "");
+}
+
+int list_devices(void)
+{
+#ifdef __linux__
+    DIR *dir = opendir("/sys/block");
+    struct dirent *ent;
+    int count = 0;
+
+    if (dir == NULL) {
+        log_out("no accessible block devices found");
+        return 0;
+    }
+
+    while ((ent = readdir(dir)) != NULL) {
+        char path[PATH_MAX];
+        device_info d;
+        char err[256];
+
+        if (ent->d_name[0] == '.')
+            continue;
+        if (strncmp(ent->d_name, "loop", 4) == 0 ||
+            strncmp(ent->d_name, "ram", 3) == 0 ||
+            strncmp(ent->d_name, "dm-", 3) == 0)
+            continue;
+
+        snprintf(path, sizeof path, "/dev/%s", ent->d_name);
+        if (device_probe(path, &d, err, sizeof err) != 0)
+            continue;
+        if (count > 0)
+            log_out("");
+        device_print_info(&d);
+        count++;
+    }
+    closedir(dir);
+
+    if (count == 0)
+        log_out("no accessible block devices found");
+    return count;
+#elif defined(__APPLE__)
+    log_out("on macOS, use: diskutil list");
+    log_out("then run: sudo flashcheck -i /dev/diskN");
+    return 0;
+#else
+    log_out("list_devices: unsupported platform");
+    return 0;
+#endif
 }
