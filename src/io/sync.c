@@ -24,22 +24,23 @@ static int loop_xfer(int fd, void *buf, uint64_t off, size_t len, int is_write)
 
     while (done < len) {
         ssize_t n;
-        int attempt = 0;
+        int attempt;
 
-        for (;;) {
-            if (is_write)
-                n = pwrite(fd, p + done, len - done, (off_t)(off + done));
-            else
-                n = pread(fd, p + done, len - done, (off_t)(off + done));
-            if (n < 0 && errno == EINTR)
-                continue;
-            break;
-        }
-        if (n < 0) {
+        for (attempt = 0; attempt < SYNC_MAX_RETRY; attempt++) {
+            for (;;) {
+                if (is_write)
+                    n = pwrite(fd, p + done, len - done, (off_t)(off + done));
+                else
+                    n = pread(fd, p + done, len - done, (off_t)(off + done));
+                if (n < 0 && errno == EINTR)
+                    continue;
+                break;
+            }
+            if (n >= 0)
+                break;
             int e = errno;
             if ((e == EIO || e == ETIMEDOUT || e == EBUSY) && attempt + 1 < SYNC_MAX_RETRY) {
                 sleep_ms(20u * (unsigned)(attempt + 1));
-                attempt++;
                 continue;
             }
             if (e == EINVAL && is_write)
@@ -183,7 +184,7 @@ io_ops *io_sync_open(const char *path, int writable, int want_direct, uint64_t c
 
 void io_sync_probe_direct(const char *path, int *supported, int *err)
 {
-    int fd = open_raw(path, O_RDONLY, 1, err);
+    int fd = open_raw(path, 0, 1, err);
     if (fd < 0) {
         *supported = 0;
         return;

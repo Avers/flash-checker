@@ -1,7 +1,7 @@
 CC      ?= cc
 CFLAGS  ?= -O2 -g
 WARN     = -Wall -Wextra -Werror -Wshadow -Wpointer-arith -Wcast-qual -Wno-unused-parameter
-DEFS     = -D_GNU_SOURCE -DFILE_OFFSET_BITS=64 -DVERSION_STR=\"$(VERSION)\"
+DEFS     = -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -DVERSION_STR=\"$(VERSION)\"
 INC      = -Iinclude
 ALLCFLAGS = -std=c11 $(WARN) $(DEFS) $(INC) $(CFLAGS) -pthread
 
