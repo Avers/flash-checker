@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-10-13
+
+### Security / Fixed
+- **JSON injection** — all string fields in JSON reports (`name`, `note`,
+  `evidence`, `path`, `vendor`, `model`, `serial`, `rev`, `transport`,
+  `usb_vidpid`, `usb_product`) are now escaped via `json_write_str()`;
+  `NULL` fields emit JSON `null` instead of an empty string
+- **Symlink attack** on checkpoint temp file — `open()` now uses
+  `O_NOFOLLOW`; mode tightened from `0644` → `0600`
+- **UB on `parse_size("nan"/"inf")`** — `isfinite()` check added before
+  `(uint64_t)` cast; both `nan` and `inf` (any case) are now rejected
+- **Heap overflow** in speed tracker trim (`stats.c`) — `t->cap` reset
+  to `SPEED_MAX_SAMPLES` after trim; `new_cap` bounded before `realloc`
+- **Directory-read EISDIR** in `scan_holders` — switched from `read()` to
+  `opendir()`/`readdir()`; all mount/swap scanners canonicalize paths with
+  `realpath()` before matching
+- **Thread pool deadlock on shutdown** — `gen_pool_destroy` now broadcasts
+  `cv_done` in addition to `cv_work`; worker checks `g->stop` after waking
+- **I/O retry infinite loop** — `loop_xfer` restructured so `attempt` is
+  the outer counter; `io_sync_probe_direct` writable arg fixed (`0` not
+  `O_RDONLY`)
+- **`_FILE_OFFSET_BITS`** macro spelling corrected in `Makefile`
+
+### Added
+- **Ctrl+C trapping** — `fc_interrupted` checks in every chunk loop across
+  all test stages; `full.c` saves a checkpoint on interrupt; exit code
+  `130` (`128 + SIGINT`) on signal termination
+- **ETA display** — live progress shows `ETA Xh Ym` when write speed > 0
+- **Ghost character cleanup** — `\x1b[K` (clear-to-EOL) appended to TTY
+  progress lines
+- **Destructive prompt context** — confirmation prompt shows `vendor`,
+  `model`, capacity, and removable status; exact `"yes"` match required
+  (case-insensitive); safety re-checked after confirmation (TOCTOU fix)
+- **`NO_COLOR` support** — console verdict line respects `NO_COLOR` env var
+  and non-TTY stdout
+- **`-y` shorthand** for `--yes`
+- **Escalation notice** always printed regardless of verbosity level
+- Regression tests: `parse_size` NaN/Inf rejection; `json_write_str`
+  escaping (quote, backslash, control chars, `\u00XX`, NULL)
+  (365 checks, 0 failures)
+
+### Changed
+- CLI parse error no longer dumps full usage; emits compact
+  `"Try 'flashcheck --help' for more information."` instead
+- `README.md` examples updated to whole-disk paths; partition warning added
+
 ## [0.3.4] - 2026-10-12
 
 ### Added
