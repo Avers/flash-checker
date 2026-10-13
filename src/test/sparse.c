@@ -33,6 +33,8 @@ int stage_sparse(run_ctx *c, stage_report *r)
     visual_stage_begin("sparse", start, end);
 
     for (i = 0; i < n; i++) {
+        if (fc_interrupted)
+            break;
         if (pipeline_write(&c->pl, probes[i], 0, &st) != 0) {
             visual_mark(probes[i], VISUAL_IOERR);
             visual_stage_end();

@@ -311,17 +311,25 @@ int pipeline_window_pass(pipeline *p, uint64_t start, uint64_t end, uint64_t win
         uint64_t wend = FC_MIN(off + window_chunks * p->chunk, end);
         uint64_t w;
 
+        if (fc_interrupted)
+            break;
         for (w = off; w < wend; w += p->chunk) {
+            if (fc_interrupted)
+                break;
             if (w + p->chunk < wend)
                 pipeline_prefetch(p, w + p->chunk, pass);
             if (pipeline_write(p, w, pass, st) != 0)
                 return -1;
         }
+        if (fc_interrupted)
+            break;
         if (pipeline_flush(p, st) != 0) {
             st->io_errors++;
             return -1;
         }
         for (w = off; w < wend; w += p->chunk) {
+            if (fc_interrupted)
+                break;
             if (w + p->chunk < wend)
                 pipeline_prefetch(p, w + p->chunk, pass);
             if (pipeline_verify(p, w, pass, st) != 0) {
@@ -342,6 +350,8 @@ int pipeline_verify_offsets(pipeline *p, const uint64_t *offs, size_t n, uint32_
     int failed = 0;
 
     for (size_t i = 0; i < n; i++) {
+        if (fc_interrupted)
+            break;
         if (i + 1 < n)
             pipeline_prefetch(p, offs[i + 1], pass);
         if (pipeline_verify(p, offs[i], pass, st) != 0) {

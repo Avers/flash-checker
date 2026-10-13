@@ -51,18 +51,21 @@ sudo make install        # install to /usr/local/bin/flashcheck
 
 ## Usage
 
+> [!IMPORTANT]
+> Always specify the **whole disk device** (e.g. `/dev/disk8` on macOS or `/dev/sdb` on Linux), **never a partition** (such as `disk8s1` or `sdb1`). Testing a partition fails to detect address aliasing across partition boundaries and corrupts partition headers.
+
 ```sh
 # Identify a device (no writes)
-sudo flashcheck /dev/disk8s1 --identify
+sudo flashcheck /dev/disk8 --identify
 
 # Standard test (destructive, requires --yes to skip confirmation)
-sudo flashcheck /dev/disk8s1 --destructive --yes
+sudo flashcheck /dev/disk8 --destructive --yes
 
 # Full test with custom block size
-sudo flashcheck /dev/disk8s1 --destructive --yes --mode full --block-size 16MiB
+sudo flashcheck /dev/disk8 --destructive --yes --mode full --block-size 16MiB
 
 # Dry run (see the plan, write nothing)
-sudo flashcheck /dev/disk8s1 --destructive --dry-run --yes
+sudo flashcheck /dev/disk8 --destructive --dry-run --yes
 
 # Self-test (no hardware needed)
 flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB
@@ -160,16 +163,16 @@ The Makefile detects the platform automatically. On macOS:
 diskutil list
 
 # Identify a device (no writes needed)
-sudo ./build/flashcheck /dev/disk8s1 --identify
+sudo ./build/flashcheck /dev/disk8 --identify
 
 # Unmount before destructive testing
-sudo diskutil unmountDisk /dev/disk8s1
+sudo diskutil unmountDisk /dev/disk8
 
 # Standard test (destructive)
-sudo ./build/flashcheck /dev/disk8s1 --destructive --yes
+sudo ./build/flashcheck /dev/disk8 --destructive --yes
 
 # Dry run (see the plan, write nothing)
-sudo ./build/flashcheck /dev/disk8s1 --destructive --dry-run --yes
+sudo ./build/flashcheck /dev/disk8 --destructive --dry-run --yes
 
 # Self-test (no hardware needed)
 ./build/flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB --yes
@@ -217,31 +220,6 @@ xattr ./build/flashcheck
 | `device is mounted` | Run `sudo diskutil unmountDisk /dev/diskN` first |
 | `cannot determine capacity` | Device may not be a block device; check `diskutil list` |
 | Gatekeeper moves binary to Trash | Run `xattr -d com.apple.quarantine ./build/flashcheck` |
-
-## Install
-
-```sh
-sudo make install        # install to /usr/local/bin/flashcheck
-```
-
-## Usage
-
-```sh
-# Identify a device (no writes)
-sudo flashcheck /dev/disk8s1 --identify
-
-# Standard test (destructive, requires --yes to skip confirmation)
-sudo flashcheck /dev/disk8s1 --destructive --yes
-
-# Full test with custom block size
-sudo flashcheck /dev/disk8s1 --destructive --yes --mode full --block-size 16MiB
-
-# Dry run (see the plan, write nothing)
-sudo flashcheck /dev/disk8s1 --destructive --dry-run --yes
-
-# Self-test (no hardware needed)
-flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB
-```
 
 ## Safety
 

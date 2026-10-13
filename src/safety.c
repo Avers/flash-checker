@@ -283,13 +283,43 @@ int safety_check(const config *c, const device_info *d, int fd, char *err, size_
         return -1;
     }
     if (!c->assume_yes && !c->dry_run) {
-        char ans[16];
+        char ans[32];
+        char cap[64];
+        size_t len;
+
+        fmt_size(cap, sizeof cap, d->capacity);
         log_out("");
         log_out("DESTRUCTIVE TEST: all data on %s will be destroyed.", d->path);
+        if (d->vendor[0] || d->model[0])
+            log_out("Target Device:    %s %s (%s, %s)",
+                    d->vendor[0] ? d->vendor : "",
+                    d->model[0] ? d->model : "",
+                    cap,
+                    d->removable == 1 ? "removable" : (d->removable == 0 ? "non-removable" : "unknown"));
+        else
+            log_out("Target Device:    %s (%s)", cap,
+                    d->removable == 1 ? "removable" : (d->removable == 0 ? "non-removable" : "unknown"));
         log_out("Type 'yes' to continue: ");
         fflush(stdout);
-        if (fgets(ans, sizeof ans, stdin) == NULL || strncmp(ans, "yes", 3) != 0) {
+        if (fgets(ans, sizeof ans, stdin) == NULL) {
             snprintf(err, errn, "aborted by user");
+            return -1;
+        }
+        len = strlen(ans);
+        while (len > 0 && (ans[len - 1] == '\n' || ans[len - 1] == '\r' || ans[len - 1] == ' ' || ans[len - 1] == '\t'))
+            ans[--len] = '\0';
+        if (strcasecmp(ans, "yes") != 0) {
+            snprintf(err, errn, "aborted by user");
+            return -1;
+        }
+        if (safety_is_mounted(d->path, detail, sizeof detail)) {
+#ifdef __APPLE__
+            snprintf(err, errn, "refusing to write: device was mounted during confirmation (%s); run: "
+                                "diskutil unmountDisk %s", detail, d->path);
+#else
+            snprintf(err, errn, "refusing to write: device was mounted during confirmation (%s); unmount it first",
+                     detail);
+#endif
             return -1;
         }
     }

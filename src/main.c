@@ -224,7 +224,7 @@ int main(int argc, char **argv)
         io->close(io);
         if (lock_fd >= 0)
             close(lock_fd);
-        return EXIT_INCONCLUSIVE;
+        return 128 + SIGINT;
     }
     if (rc < 0) {
         pipeline_free(&ctx.pl);

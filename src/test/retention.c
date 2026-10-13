@@ -38,7 +38,11 @@ int stage_retention(run_ctx *c, stage_report *r)
     for (pass = 0; pass < c->cfg->passes && !failed; pass++) {
         uint32_t p = (uint32_t)(pass + 1);
 
+        if (fc_interrupted)
+            break;
         for (off = 0; off < n_anchors; off++) {
+            if (fc_interrupted)
+                break;
             if (pipeline_write(&c->pl, anchors[off], p, &st) != 0) {
                 visual_mark(anchors[off], VISUAL_IOERR);
                 visual_stage_end();
@@ -51,6 +55,8 @@ int stage_retention(run_ctx *c, stage_report *r)
             speed_mark(&w, st.bytes_written);
             visual_mark(anchors[off], VISUAL_OK);
         }
+        if (fc_interrupted)
+            break;
         if (pipeline_flush(&c->pl, &st) != 0) {
             r->io_errors = ++st.io_errors;
             snprintf(r->note, sizeof r->note, "flush failed");
@@ -61,6 +67,8 @@ int stage_retention(run_ctx *c, stage_report *r)
         for (off = start; off < fill_end; off += c->pl.chunk) {
             int is_anchor = 0;
 
+            if (fc_interrupted)
+                break;
             if (off + c->pl.chunk < fill_end)
                 pipeline_prefetch(&c->pl, off + c->pl.chunk, (uint32_t)(pass + 1000));
             for (uint64_t i = 0; i < n_anchors; i++) {
@@ -85,6 +93,8 @@ int stage_retention(run_ctx *c, stage_report *r)
             stage_progress("fill", st.bytes_written, (fill_end - start) * c->cfg->passes,
                            w.total_bytes / FC_MAX(w.last_ms - w.start_ms, 1) * 1000.0);
         }
+        if (fc_interrupted)
+            break;
         if (pipeline_flush(&c->pl, &st) != 0) {
             r->io_errors = ++st.io_errors;
             speed_free(&w);

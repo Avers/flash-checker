@@ -34,6 +34,8 @@ int stage_benchmark(run_ctx *c, stage_report *r)
     }
 
     for (off = start; off < bend; off += c->pl.chunk) {
+        if (fc_interrupted)
+            break;
         if (off + c->pl.chunk < bend)
             pipeline_prefetch(&c->pl, off + c->pl.chunk, 0);
         if (pipeline_write(&c->pl, off, 0, &st) != 0)
@@ -48,6 +50,8 @@ int stage_benchmark(run_ctx *c, stage_report *r)
 
     visual_stage_step(); /* read pass is its own numbered step */
     for (off = start; off < bend; off += c->pl.chunk) {
+        if (fc_interrupted)
+            break;
         if (off + c->pl.chunk < bend)
             pipeline_prefetch(&c->pl, off + c->pl.chunk, 0);
         if (pipeline_verify(&c->pl, off, 0, &st) != 0 && st.io_errors > 0)
