@@ -70,7 +70,7 @@ int main(int argc, char **argv)
     }
     if (rc != CLI_OK) {
         log_err("%s", err);
-        cli_usage(stderr, FC_PROG);
+        fprintf(stderr, "Try '%s --help' for more information.\n", FC_PROG);
         return EXIT_USAGE;
     }
     /* Default (no -v): easy mode — one live progress line + short summary.

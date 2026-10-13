@@ -1,6 +1,7 @@
 #include "flashcheck/config.h"
 #include "flashcheck/pattern.h"
 #include "flashcheck/pipeline.h"
+#include "flashcheck/report.h"
 #include "flashcheck/sha256.h"
 #include "flashcheck/util.h"
 #include "test_util.h"
@@ -157,12 +158,60 @@ static void test_util_parsing(void)
     CHECK(parse_size("bogus", &v) != 0);
     CHECK(parse_size("12x", &v) != 0);
     CHECK(parse_size("", &v) != 0);
+    CHECK(parse_size("nan", &v) != 0);
+    CHECK(parse_size("inf", &v) != 0);
+    CHECK(parse_size("NaN", &v) != 0);
+    CHECK(parse_size("Inf", &v) != 0);
     T_BEGIN("size formatting");
     {
         char sbuf[64];
         fmt_size(sbuf, sizeof sbuf, 0);
         CHECK_STR(sbuf, "0.00 B");
     }
+}
+
+static void test_json_write_str(void)
+{
+    char *buf = NULL;
+    size_t len = 0;
+    FILE *f;
+
+    T_BEGIN("json_write_str escaping");
+
+    /* plain string */
+    f = open_memstream(&buf, &len);
+    json_write_str(f, "hello");
+    fclose(f);
+    CHECK_STR(buf, "\"hello\"");
+    free(buf); buf = NULL; len = 0;
+
+    /* embedded quote and backslash */
+    f = open_memstream(&buf, &len);
+    json_write_str(f, "a\"b\\c");
+    fclose(f);
+    CHECK_STR(buf, "\"a\\\"b\\\\c\"");
+    free(buf); buf = NULL; len = 0;
+
+    /* control characters: newline, tab, carriage return */
+    f = open_memstream(&buf, &len);
+    json_write_str(f, "\n\t\r");
+    fclose(f);
+    CHECK_STR(buf, "\"\\n\\t\\r\"");
+    free(buf); buf = NULL; len = 0;
+
+    /* low control char (BEL = 0x07) becomes \u00XX */
+    f = open_memstream(&buf, &len);
+    json_write_str(f, "\x07");
+    fclose(f);
+    CHECK_STR(buf, "\"\\u0007\"");
+    free(buf); buf = NULL; len = 0;
+
+    /* NULL pointer → emit "null" (no quotes) */
+    f = open_memstream(&buf, &len);
+    json_write_str(f, NULL);
+    fclose(f);
+    CHECK_STR(buf, "null");
+    free(buf); buf = NULL; len = 0;
 }
 
 static void test_first_diff(void)
@@ -210,6 +259,7 @@ void test_pattern_and_math(void)
     test_chunk_math();
     test_probes();
     test_util_parsing();
+    test_json_write_str();
     test_first_diff();
     test_config_validate();
 }

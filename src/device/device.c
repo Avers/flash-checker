@@ -13,6 +13,7 @@
 #endif
 
 #include "flashcheck/io.h"
+#include "flashcheck/report.h"
 #include "flashcheck/util.h"
 
 #ifdef __linux__
@@ -224,14 +225,14 @@ void device_json(const device_info *d, void *ctx, int indent)
 
     fmt_size(cap, sizeof cap, d->capacity);
     fprintf(o, "%*s\"device\": {\n", indent, "");
-    fprintf(o, "%*s  \"path\": \"%s\",\n", indent, "", d->path);
-    fprintf(o, "%*s  \"usb_vid_pid\": \"%s\",\n", indent, "", na(d->usb_vidpid));
-    fprintf(o, "%*s  \"usb_product\": \"%s\",\n", indent, "", na(d->usb_product));
-    fprintf(o, "%*s  \"vendor\": \"%s\",\n", indent, "", na(d->vendor));
-    fprintf(o, "%*s  \"model\": \"%s\",\n", indent, "", na(d->model));
-    fprintf(o, "%*s  \"serial\": \"%s\",\n", indent, "", na(d->serial));
-    fprintf(o, "%*s  \"rev\": \"%s\",\n", indent, "", na(d->rev));
-    fprintf(o, "%*s  \"transport\": \"%s\",\n", indent, "", na(d->transport));
+    fprintf(o, "%*s  \"path\": ", indent, ""); json_write_str(o, d->path); fprintf(o, ",\n");
+    fprintf(o, "%*s  \"usb_vid_pid\": ", indent, ""); json_write_str(o, na(d->usb_vidpid)); fprintf(o, ",\n");
+    fprintf(o, "%*s  \"usb_product\": ", indent, ""); json_write_str(o, na(d->usb_product)); fprintf(o, ",\n");
+    fprintf(o, "%*s  \"vendor\": ", indent, ""); json_write_str(o, na(d->vendor)); fprintf(o, ",\n");
+    fprintf(o, "%*s  \"model\": ", indent, ""); json_write_str(o, na(d->model)); fprintf(o, ",\n");
+    fprintf(o, "%*s  \"serial\": ", indent, ""); json_write_str(o, na(d->serial)); fprintf(o, ",\n");
+    fprintf(o, "%*s  \"rev\": ", indent, ""); json_write_str(o, na(d->rev)); fprintf(o, ",\n");
+    fprintf(o, "%*s  \"transport\": ", indent, ""); json_write_str(o, na(d->transport)); fprintf(o, ",\n");
     fprintf(o, "%*s  \"removable\": %d,\n", indent, "", d->removable);
     fprintf(o, "%*s  \"logical_block_size\": %u,\n", indent, "", d->logical_sector);
     fprintf(o, "%*s  \"physical_block_size\": %u,\n", indent, "", d->physical_sector);
