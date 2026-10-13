@@ -4,6 +4,7 @@ WARN     = -Wall -Wextra -Werror -Wshadow -Wpointer-arith -Wcast-qual -Wno-unuse
 DEFS     = -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -DVERSION_STR=\"$(VERSION)\"
 INC      = -Iinclude
 ALLCFLAGS = -std=c11 $(WARN) $(DEFS) $(INC) $(CFLAGS) -pthread
+LDFLAGS  += -lm
 
 SRCDIRS  = src src/device src/io src/crypto src/pattern src/test src/scheduler src/stats src/report
 
