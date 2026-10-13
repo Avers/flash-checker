@@ -169,7 +169,7 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
 
     *action = CLI_ACTION_RUN;
     optind = 1;
-    while ((ch = getopt_long(argc, argv, "idb:w:n:p:vh", opts, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "idb:w:n:p:vyh", opts, NULL)) != -1) {
         switch (ch) {
         case 'i':
             c->mode = MODE_IDENTIFY;
@@ -262,6 +262,7 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
         case OPT_NO_DIRECT:
             c->want_direct = 0;
             break;
+        case 'y':
         case OPT_YES:
             c->assume_yes = 1;
             break;

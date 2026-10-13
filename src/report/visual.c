@@ -162,7 +162,7 @@ const uint8_t *visual_map_cells(void) { return g_map; }
 
 void visual_update(const char *label, uint64_t done, uint64_t total, double bps)
 {
-    char bar[256], a[64], b[64], r[64], tag[32];
+    char bar[256], a[64], b[64], r[64], tag[32], eta_buf[64] = "";
     uint64_t now = now_ms();
     int pct = 0;
     int tty;
@@ -182,12 +182,21 @@ void visual_update(const char *label, uint64_t done, uint64_t total, double bps)
     fmt_rate(r, sizeof r, bps);
     stage_tag(tag, sizeof tag);
 
+    if (bps > 0 && total > done) {
+        double rem = (double)(total - done) / bps;
+        char tbuf[64];
+        fmt_time(tbuf, sizeof tbuf, rem);
+        snprintf(eta_buf, sizeof eta_buf, " ETA %s", tbuf);
+    }
+
     tty = isatty(STDOUT_FILENO);
     if (tty) {
-        fprintf(stdout, "\r  %s%s %s %3d%% %s/%s %s", tag, label, bar, pct, a, b, r);
+        fprintf(stdout, "\r  %s%s %s %3d%% %s/%s %s%s\x1b[K", tag, label, bar, pct, a, b, r,
+                eta_buf);
         g_line_open = 1;
     } else {
-        fprintf(stdout, "  %s%s %s %3d%% %s/%s %s\n", tag, label, bar, pct, a, b, r);
+        fprintf(stdout, "  %s%s %s %3d%% %s/%s %s%s\n", tag, label, bar, pct, a, b, r,
+                eta_buf);
         g_line_open = 0;
     }
     fflush(stdout);
@@ -213,7 +222,7 @@ void visual_update_count(const char *label, uint64_t done, uint64_t total)
 
     tty = isatty(STDOUT_FILENO);
     if (tty) {
-        fprintf(stdout, "\r  %s%s %s %3d%% %llu/%llu", tag, label, bar, pct,
+        fprintf(stdout, "\r  %s%s %s %3d%% %llu/%llu\x1b[K", tag, label, bar, pct,
                 (unsigned long long)done, (unsigned long long)total);
         g_line_open = 1;
     } else {

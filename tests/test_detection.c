@@ -202,6 +202,22 @@ static void test_speed_track(void)
     speed_free(&t);
 }
 
+static void test_speed_capacity_trim(void)
+{
+    speed_track t;
+
+    T_BEGIN("speed tracker trims safely at SPEED_MAX_SAMPLES");
+    speed_init(&t);
+    for (size_t i = 0; i < SPEED_MAX_SAMPLES + 100; i++) {
+        t.last_ms = 0;
+        speed_mark(&t, (uint64_t)(i + 1) * 1024u);
+    }
+    CHECK(t.cap == SPEED_MAX_SAMPLES);
+    CHECK(t.n <= SPEED_MAX_SAMPLES);
+    CHECK(t.n >= SPEED_MAX_SAMPLES / 2);
+    speed_free(&t);
+}
+
 static void test_speed_peak_window(void)
 {
     speed_track t;
@@ -572,6 +588,7 @@ void test_io_and_detection(void)
     test_alias_attribution();
     test_window_pass();
     test_speed_track();
+    test_speed_capacity_trim();
     test_speed_peak_window();
     test_checkpoint();
     test_safety_mounted();

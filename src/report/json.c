@@ -1,13 +1,45 @@
 #include "flashcheck/report.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include "flashcheck/util.h"
+
+void json_write_str(FILE *f, const char *s)
+{
+    if (s == NULL) {
+        fputs("null", f);
+        return;
+    }
+    fputc('"', f);
+    for (const char *p = s; *p != '\0'; p++) {
+        switch (*p) {
+        case '"':  fputs("\\\"", f); break;
+        case '\\': fputs("\\\\", f); break;
+        case '\b': fputs("\\b", f); break;
+        case '\f': fputs("\\f", f); break;
+        case '\n': fputs("\\n", f); break;
+        case '\r': fputs("\\r", f); break;
+        case '\t': fputs("\\t", f); break;
+        default:
+            if ((unsigned char)*p < 0x20)
+                fprintf(f, "\\u%04x", (unsigned char)*p);
+            else
+                fputc(*p, f);
+            break;
+        }
+    }
+    fputc('"', f);
+}
 
 static void json_stage(FILE *f, const stage_report *r)
 {
     char a[64];
 
     fprintf(f, "    {\n");
-    fprintf(f, "      \"name\": \"%s\",\n", r->name);
+    fprintf(f, "      \"name\": ");
+    json_write_str(f, r->name);
+    fprintf(f, ",\n");
     fprintf(f, "      \"bytes_written\": %llu,\n", (unsigned long long)r->bytes_written);
     fprintf(f, "      \"bytes_verified\": %llu,\n", (unsigned long long)r->bytes_verified);
     fprintf(f, "      \"regions_written\": %llu,\n",
@@ -43,16 +75,25 @@ static void json_stage(FILE *f, const stage_report *r)
                 (unsigned long long)r->reliable_capacity);
         fprintf(f, "      \"reliable_capacity_human\": \"%s\",\n", a);
     }
-    fprintf(f, "      \"note\": \"%s\"\n", r->note);
+    fprintf(f, "      \"note\": ");
+    json_write_str(f, r->note);
+    fprintf(f, "\n");
     fprintf(f, "    }");
 }
 
 int report_json(const run_ctx *c, verdict v, const char *path)
 {
-    FILE *f = fopen(path, "w");
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    FILE *f;
     char a[64], ev[512];
 
+    if (fd < 0) {
+        log_warn("cannot write JSON report to %s: %s", path, strerror(errno));
+        return -1;
+    }
+    f = fdopen(fd, "w");
     if (f == NULL) {
+        close(fd);
         log_warn("cannot write JSON report to %s: %s", path, strerror(errno));
         return -1;
     }
@@ -93,7 +134,9 @@ int report_json(const run_ctx *c, verdict v, const char *path)
     }
     fprintf(f, "  ],\n");
     fprintf(f, "  \"verdict\": \"%s\",\n", verdict_str(v));
-    fprintf(f, "  \"evidence\": \"%s\"\n", report_evidence(c, ev, sizeof ev));
+    fprintf(f, "  \"evidence\": ");
+    json_write_str(f, report_evidence(c, ev, sizeof ev));
+    fprintf(f, "\n");
     fprintf(f, "}\n");
     if (fclose(f) != 0) {
         log_warn("error closing JSON report %s", path);

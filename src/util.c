@@ -3,6 +3,7 @@
 #include "flashcheck/visual.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <time.h>
@@ -142,7 +143,7 @@ int parse_size(const char *s, uint64_t *out)
             return -1;
     }
     v = v * (double)mult;
-    if (v < 0 || v > 1.8e19)
+    if (!isfinite(v) || v < 0 || v > 1.8e19)
         return -1;
     *out = (uint64_t)v;
     return 0;

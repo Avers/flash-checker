@@ -143,9 +143,11 @@ int run_execute(run_ctx *c)
     if (r->chunks_failed > 0 || m == MODE_STANDARD)
         return 0;
 
-    if (m == MODE_ADAPTIVE && !visual_is_enabled())
+    if (m == MODE_ADAPTIVE) {
+        visual_break_line();
         log_out("no counter-evidence from probe, retention and capacity search; "
                 "escalating to full write/read verify (use --mode standard to stop here)");
+    }
 
     r = stage_new(c, "full-verify");
     if (stage_full(c, r) < 0)

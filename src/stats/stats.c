@@ -25,16 +25,20 @@ void speed_mark(speed_track *t, uint64_t total_bytes)
         return;
     t->last_ms = now;
     if (t->n == t->cap) {
-        t->cap *= 2;
-        if (t->cap > SPEED_MAX_SAMPLES) {
+        if (t->cap >= SPEED_MAX_SAMPLES) {
             size_t keep = SPEED_MAX_SAMPLES / 2;
             memmove(t->s, t->s + (t->n - keep), keep * sizeof *t->s);
             t->n = keep;
+            t->cap = SPEED_MAX_SAMPLES;
         } else {
-            speed_sample *ns = realloc(t->s, t->cap * sizeof *t->s);
+            size_t new_cap = t->cap * 2;
+            if (new_cap > SPEED_MAX_SAMPLES)
+                new_cap = SPEED_MAX_SAMPLES;
+            speed_sample *ns = realloc(t->s, new_cap * sizeof *t->s);
             if (ns == NULL)
                 return;
             t->s = ns;
+            t->cap = new_cap;
         }
     }
     t->s[t->n].t_ms = now - t->start_ms;

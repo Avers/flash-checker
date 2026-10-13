@@ -104,6 +104,8 @@ static void *worker_main(void *arg)
             g->req_pass = pass;
             pthread_cond_broadcast(&g->cv_done);
             pthread_cond_wait(&g->cv_done, &g->mu);
+            if (g->stop)
+                break;
             continue;
         }
 
@@ -168,6 +170,7 @@ void gen_pool_destroy(gen_pool *g)
         pthread_mutex_lock(&g->mu);
         g->stop = 1;
         pthread_cond_broadcast(&g->cv_work);
+        pthread_cond_broadcast(&g->cv_done);
         pthread_mutex_unlock(&g->mu);
         pthread_join(g->worker, NULL);
     }

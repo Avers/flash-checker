@@ -43,16 +43,33 @@ int stage_full(run_ctx *c, stage_report *r)
         uint64_t wend = FC_MIN(off + window_chunks * c->pl.chunk, end);
         uint64_t o;
 
+        if (fc_interrupted) {
+            memset(&cp, 0, sizeof cp);
+            snprintf(cp.stage, sizeof cp.stage, "full-verify");
+            cp.test_id = c->test_id;
+            cp.offset = off;
+            cp.bytes_written = st.bytes_written;
+            cp.bytes_verified = st.bytes_verified;
+            cp.errors = st.io_errors;
+            checkpoint_save(c->checkpoint_path, &cp);
+            break;
+        }
         for (o = off; o < wend; o += c->pl.chunk) {
+            if (fc_interrupted)
+                break;
             if (o + c->pl.chunk < wend)
                 pipeline_prefetch(&c->pl, o + c->pl.chunk, 1);
             if (pipeline_write(&c->pl, o, 1, &st) != 0)
                 goto io_error;
             speed_mark(&w, st.bytes_written);
         }
+        if (fc_interrupted)
+            break;
         if (pipeline_flush(&c->pl, &st) != 0)
             goto io_error;
         for (o = off; o < wend; o += c->pl.chunk) {
+            if (fc_interrupted)
+                break;
             if (o + c->pl.chunk < wend)
                 pipeline_prefetch(&c->pl, o + c->pl.chunk, 1);
             if (pipeline_verify(&c->pl, o, 1, &st) != 0) {

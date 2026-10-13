@@ -96,6 +96,8 @@ int stage_boundary(run_ctx *c, stage_report *r)
     visual_stage_begin("boundary", 0, end);
 
     for (;;) {
+        if (fc_interrupted)
+            break;
         if (x > end) {
             if (!have_fail)
                 hi = end;
@@ -143,6 +145,8 @@ int stage_boundary(run_ctx *c, stage_report *r)
         uint64_t res = FC_MAX(chunk, c->cfg->boundary_resolution);
         while (hi - lo > res) {
             uint64_t mid = lo + (hi - lo) / 2;
+            if (fc_interrupted)
+                break;
             if (spent + 2 * mid > budget) {
                 budget_stop = 1;
                 log_warn("capacity search stopped early: the next probe needs more I/O than "

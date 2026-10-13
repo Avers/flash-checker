@@ -79,7 +79,7 @@ int checkpoint_save(const char *path, const checkpoint *cp)
     n = snprintf(tmp, sizeof tmp, "%s.tmp", path);
     if (n < 0 || (size_t)n >= sizeof tmp)
         return -1;
-    fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW, 0600);
     if (fd < 0)
         return -1;
 n = snprintf(txt, sizeof txt,

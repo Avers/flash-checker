@@ -3,6 +3,7 @@
 #include "flashcheck/util.h"
 #include "flashcheck/common.h"
 #include "flashcheck/visual.h"
+#include <unistd.h>
 
 static void print_visual_summary(const run_ctx *c, verdict v, uint64_t mism, uint64_t io_err)
 {
@@ -92,6 +93,13 @@ static const char *short_desc(const run_ctx *c, verdict v, uint64_t mism)
     return "test failed";
 }
 
+static int use_color(void)
+{
+    if (getenv("NO_COLOR") != NULL)
+        return 0;
+    return isatty(STDOUT_FILENO);
+}
+
 static void print_short_result(const run_ctx *c, verdict v, uint64_t mism)
 {
     const char *color, *label;
@@ -101,7 +109,10 @@ static void print_short_result(const run_ctx *c, verdict v, uint64_t mism)
     default:                   color = COLOR_YELLOW; label = "INCONCLUSIVE"; break;
     }
     const char *desc = short_desc(c, v, mism);
-    fprintf(stdout, "%s%s%s  %s%s\n", color, COLOR_BOLD, label, desc, COLOR_RESET);
+    if (use_color())
+        fprintf(stdout, "%s%s%s  %s%s\n", color, COLOR_BOLD, label, desc, COLOR_RESET);
+    else
+        fprintf(stdout, "%s  %s\n", label, desc);
 }
 
 const char *report_evidence(const run_ctx *c, char *buf, size_t n)
