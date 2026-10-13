@@ -63,8 +63,11 @@ lint:
 	@command -v clang-tidy >/dev/null 2>&1 && clang-tidy --version || echo "clang-tidy not installed; relying on -Werror build"
 	@$(MAKE) --no-print-directory all
 
+PREFIX  ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+
 install: $(BIN)
-	install -Dm755 $(BIN) $(DESTDIR)/usr/local/bin/flashcheck
+	install -Dm755 $(BIN) $(DESTDIR)$(BINDIR)/flashcheck
 
 clean:
 	rm -rf build
