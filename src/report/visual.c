@@ -162,7 +162,7 @@ const uint8_t *visual_map_cells(void) { return g_map; }
 
 void visual_update(const char *label, uint64_t done, uint64_t total, double bps)
 {
-    char bar[256], a[64], b[64], r[64], tag[32], eta_buf[64] = "";
+    char bar[256], a[64], b[64], r[64], tag[32], eta_buf[128] = "";
     uint64_t now = now_ms();
     int pct = 0;
     int tty;
