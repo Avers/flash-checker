@@ -1,127 +1,104 @@
-# flashcheck — Audit Report & Remediation Plan
+# flashcheck — Project Audit & Recommendations
 
-> **Date:** 2026-10-13  
-> **Scope:** Security & Memory Safety · Concurrency & I/O Reliability · CLI UX & Human-Friendly Output  
-> **Status:** Verified in source code
-
----
+> **Audit date:** 2026-10-18
+> **Scope:** Raw-device safety, interruption and resume behavior, I/O and reporting, build/test coverage, and project documentation.
+> **Method:** Read-only source and documentation review, followed by the repository's clean release build and test suite. No physical block device was opened for testing.
 
 ## Executive Summary
 
-flashcheck is a raw block device flash verification tool written in C11. Deep static and algorithmic auditing identified **3 CRITICAL** and **6 HIGH** security/reliability issues, and **5 P0 UX issues** across signal handling, confirmation prompts, and progress reporting.
+The five P1 findings below have been addressed in the `ai/critical-audit-fixes` branch. The implementation now reports interrupted runs as `INCONCLUSIVE`, checks layered storage relationships, binds safety checks and locking to the opened device descriptor, stops unsubmitted writes on interruption, and validates checkpoint device and run identity. The P2 findings remain open.
 
-| Category | Critical (P0) | High (P1) | Medium (P2) | Low / Polish (P3) | Total |
-|:---|:---:|:---:|:---:|:---:|:---:|
-| **Security & Memory Safety** | 3 | 6 | 4 | 3 | **16** |
-| **UX & Human-Friendly Output** | 5 | 6 | 5 | 4 | **20** |
-| **Total** | **8** | **12** | **9** | **7** | **36** |
+| Priority | Finding | Impact |
+|---|---|---|
+| P1 | Interrupted full runs can be reported as `PASS` — fixed in branch | A partial verification could appear to certify a device |
+| P1 | Mounted-device checks miss some storage topology — fixed in branch | A disk backing an active filesystem could evade the write interlock |
+| P1 | Interrupt handling can continue issuing writes — fixed in branch | Ctrl+C could allow queued destructive I/O to continue |
+| P1 | Checkpoints are not bound to device or run settings — fixed in branch | Reusing a checkpoint could skip part of verification |
+| P1 | Device checks are path-based and can race the writable open — fixed in branch | A path change could cause safety checks to inspect a different target |
+| P2 | JSON report output follows symlinks and uses mode 0644 | Privileged runs can overwrite a symlink target; reports expose device identifiers |
+| P2 | Optional io_uring backend is absent from normal PR CI | Backend regressions may not be caught before release builds |
+| P2 | README install example is outdated | Readers may download an obsolete release from the wrong repository slug |
 
----
+## Findings and Recommendations
 
-## Findings
+### P1 — Interrupted verification can report `PASS`
 
-### Security & Memory Safety
+**Evidence:** `run_verdict()` does not check `fc_interrupted` in `src/test/test.c:67-85`. `main()` computes and prints the verdict before its interrupt handling in `src/main.c:205-227`. `stage_full()` exits its loops on interruption and returns normally in `src/test/full.c:42-133`.
 
-#### Critical (P0)
-1. **C1 — Heap Buffer Overflow in Rate Tracker ([`src/stats/stats.c:27-39`](../src/stats/stats.c#L27-L39)):**
-   When `t->n == t->cap` and `t->cap` reaches `SPEED_MAX_SAMPLES` (8,192), `t->cap *= 2` doubles capacity to 16,384. The branch trims `t->n = 4096` using `memmove`, but never resets `t->cap` to 8,192. Subsequent 8,192 samples write up to 128 KiB past the allocated buffer.
-   *Fix:* Reset `t->cap = SPEED_MAX_SAMPLES;` when trimming.
+**Impact:** An interrupted full/adaptive run can print `RESULT: PASS` and write a JSON report with a passing verdict, even though the process later exits with status 130.
 
-2. **C2 — Active LVM, LUKS, and RAID Volumes Undetected via Broken Holders Check ([`src/safety.c:107-125`](../src/safety.c#L107-L125)):**
-   `/sys/block/<dev>/holders` is a directory. Calling `read()` returns `EISDIR`. The function returns 0 ("no holders"), blinding safety checks to active mapped physical volumes.
-   *Fix:* Enumerate entries using `opendir()` / `readdir()`.
+**Status:** Fixed in branch. Interrupted runs now produce `INCONCLUSIVE`; checkpoint completion requires full coverage without failure or interruption.
 
-3. **C3 — Mount Interlock Bypass via Symlinks and Unresolved Device Paths ([`src/safety.c:41-64`](../src/safety.c#L41-L64)):**
-   `safety_mount_matches` performs string prefix matching against `/proc/mounts` without resolving symlinks or devmapper names with `realpath()`. Specifying devices via `/dev/disk/by-id/*` bypasses the mount check.
-   *Fix:* Resolve target device and `/proc/mounts` device paths with `realpath()`.
+### P1 — Mounted-device interlock misses layered storage
 
-#### High (P1)
-4. **H1 — Infinite Retry Loop on Block Device I/O Errors ([`src/io/sync.c:27-44`](../src/io/sync.c#L27-L44)):**
-   `int attempt = 0;` is declared inside `while (done < len)`. When `pwrite`/`pread` fails with `EIO/ETIMEDOUT/EBUSY`, `continue` jumps to the top of `while`, resetting `attempt = 0` and looping indefinitely on bad sectors.
-   *Fix:* Move `attempt` outside `while (done < len)` or encapsulate retries inside an inner loop.
+**Evidence:** On Linux, `scan_holders()` checks only `/sys/block/<device>/holders` in `src/safety.c:136-165`; holders attached to a partition are under that partition's sysfs directory. On macOS, `scan_mounts_bsd()` compares mount source names in `src/safety.c:168-197` but does not resolve physical APFS stores to synthesized mounted containers. The roadmap already records this APFS gap in `docs/roadmap.md:49-53`.
 
-5. **H2 — Thread Deadlock in Generator Worker Pool Shutdown ([`src/scheduler/pool.c:163-173`](../src/scheduler/pool.c#L163-L173)):**
-   If worker thread waits on `cv_done` when slots are starved, `gen_pool_destroy()` only signals `cv_work`. The worker never wakes, causing `pthread_join` to hang.
-   *Fix:* Broadcast both `cv_work` and `cv_done` on `g->stop = 1`.
+**Impact:** A whole disk backing an active LVM/LUKS/RAID partition or mounted APFS container may not match the mounted device name. With `--yes`, the removable-device confirmation does not prevent writes to that in-use disk.
 
-6. **H3 — 32-Bit File Offset Truncation in Makefile ([`Makefile:4`](../Makefile#L4)):**
-   Macro defined as `-DFILE_OFFSET_BITS=64` instead of `-D_FILE_OFFSET_BITS=64` (missing leading underscore), limiting `off_t` to 32 bits on 32-bit platforms.
-   *Fix:* Add missing underscore.
+**Status:** Fixed in branch. Linux checks the opened device's sysfs partition and holder graph against mount and swap state. macOS checks APFS physical-store/container relationships and refuses destructive access when it cannot verify them.
 
-7. **H4 — JSON Injection / Syntax Invalidation via Unescaped Device Strings ([`src/report/json.c`](../src/report/json.c), [`src/device/device.c:226-242`](../src/device/device.c#L226-L242)):**
-   Model, serial, vendor, and note strings emitted without escaping quotes, backslashes, or control characters.
-   *Fix:* Add `json_write_str()` escaping helper.
+### P1 — Device checks are path-based and can race the writable open
 
-8. **H5 — TOCTOU Race: Mount Status Not Re-verified After User Confirmation ([`src/safety.c:238-248`](../src/safety.c#L238-L248)):**
-   Mount check occurs before interactive prompt; automounters can mount partitions while waiting for user confirmation.
-   *Fix:* Re-check `safety_is_mounted()` after confirmation.
+**Evidence:** `device_probe()` checks a path, `main()` calls `safety_check()` and only afterward opens the device for I/O in `src/main.c:112-157`. `safety_check()` ignores its `fd` argument in `src/safety.c:255-260`, and the caller passes `-1`.
 
-9. **H6 — Insecure Temporary File Creation ([`src/checkpoint.c:82`](../src/checkpoint.c#L82), [`src/report/json.c:52`](../src/report/json.c#L52)):**
-   Temporary files created without `O_NOFOLLOW | O_EXCL` and with mode `0644`.
-   *Fix:* Restrict to mode `0600` and pass `O_NOFOLLOW | O_EXCL`.
+**Impact:** A replaceable symlink or device-node path can refer to a different device between the safety check and the writable open. The mounted-state check is not bound to the descriptor that will receive writes.
 
-#### Medium & Low (P2 / P3)
-10. **M1 (`src/safety.c:89-105`):** `scan_swaps` matches using `strstr(line, path)` without tokenizing.
-11. **M2 (`src/safety.c:127-150`):** macOS APFS container synthesis devices bypass BSD mount checks without container tree resolution.
-12. **M3 (`src/util.c:97-110`):** `parse_size` lacks `!isfinite(v)` check; casting `NaN` to `(uint64_t)` is undefined behavior.
-13. **M4 (`include/flashcheck/device.h:6`):** Fixed 128-byte `DEV_STR` buffers truncate long persistent `/dev/disk/by-*` paths.
-14. **M5 (`src/io/sync.c:186`):** `io_sync_probe_direct` passes `O_RDONLY` to boolean `writable` argument.
-15. **M6 (`include/flashcheck/util.h:20-25`):** Logging functions lack compiler format verification attributes (`__attribute__((format(printf, ...)))`).
+**Status:** Fixed in branch. The final I/O descriptor is validated against the probed `st_rdev` and capacity before any test writes. Mounted-state checks and the exclusive lock use that descriptor, followed by another in-use check after locking.
 
----
+### P1 — Ctrl+C does not stop all write paths promptly
 
-### UX & Human-Friendly Output
+**Evidence:** The standalone benchmark loops in `src/test/bench.c:39-63` do not check `fc_interrupted`. For batched backends, `pipeline_free()` calls `drain_writes()` in `src/scheduler/pipeline.c:43-50`; `main()` invokes cleanup after detecting interruption in `src/main.c:221-227`.
 
-#### Critical (P0)
-1. **U1 — Ctrl+C Fails to Interrupt Active Tests ([`src/test/full.c:42-85`](../src/test/full.c#L42-L85), [`src/scheduler/pipeline.c:310-336`](../src/scheduler/pipeline.c#L310-L336)):**
-   `fc_interrupted` is never checked inside chunk/stage loops; first Ctrl+C is completely ignored during tests.
-2. **U2 — Destructive Confirmation Prompt Omits Drive Details & Allows Loose Match ([`src/safety.c:238-248`](../src/safety.c#L238-L248)):**
-   Displays only bare path without vendor/model/size; `strncmp(ans, "yes", 3)` accepts `"yesterday"`.
-3. **U3 — README Examples Recommend Partition Paths Instead of Whole Disks ([`README.md:56-65`](../README.md#L56-L65)):**
-   Testing partitions fails to detect address wrap-around beyond partition boundaries.
-4. **U4 — Missing Estimated Time Remaining (ETA) in Progress Output ([`src/report/visual.c:163-194`](../src/report/visual.c#L163-L194)):**
-   Displays speed and percentage but no estimated time remaining.
-5. **U5 — Missing Pre-flight Summary Before Writes ([`src/main.c:47-178`](../src/main.c#L47-L178)):**
-   With `--yes`, execution begins immediately without summarizing target device and test plan.
+**Impact:** `--bench` can continue its full configured write/read run after Ctrl+C. An interrupted batched run can submit queued writes during cleanup, after the user has asked it to stop.
 
-#### High (P1)
-6. **U6 ([`src/report/console.c:104`](../src/report/console.c#L104)):** ANSI color escapes emitted unconditionally in verdict output; missing `isatty()` guard and `NO_COLOR` support.
-7. **U7 ([`src/main.c:71-75`](../src/main.c#L71-L75)):** CLI syntax typos dump entire 60-line usage to stderr.
-8. **U8 ([`src/test/test.c:146-148`](../src/test/test.c#L146-L148)):** Adaptive escalation notice is hidden in default visual mode.
-9. **U9 ([`src/report/visual.c:189-192`](../src/report/visual.c#L189-L192)):** Non-TTY redirected runs print unthrottled newlines every 500ms.
-10. **U10 ([`src/device/device.c:111-122`](../src/device/device.c#L111-L122)):** Permission and device errors lack actionable hints (`sudo`, `flashcheck -i`).
-11. **U11 ([`src/main.c:227`](../src/main.c#L227)):** Interrupted executions exit with code 2 (INCONCLUSIVE) instead of `130` (`128 + SIGINT`).
+**Status:** Fixed in branch. Write submission and batch draining honor the interrupt flag; interrupted cleanup releases queued buffers without submitting them. Synchronous I/O already submitted is allowed to return before cleanup.
 
-#### Medium & Low (P2 / P3)
-12. **U12 ([`README.md:221-244`](../README.md#L221-L244)):** Duplicate `## Install` and `## Usage` sections.
-13. **U13 ([`src/report/visual.c:187`](../src/report/visual.c#L187)):** Terminal redraws using `\r` lack ANSI clear-to-EOL (`\x1b[K`).
-14. **U14 ([`src/util.c:167`](../src/util.c#L167)):** Size output shows only binary GiB without decimal GB.
-15. **U15 ([`src/report/console.c:275`](../src/report/console.c#L275)):** Total elapsed wall-clock duration omitted from summary.
-16. **U16 ([`src/cli.c`](../src/cli.c)):** Missing `-y` shorthand for `--yes` and `-q`/`--quiet` flag.
+### P1 — Resume checkpoints are not bound to a device or test configuration
 
----
+**Evidence:** The checkpoint contains a stage, test ID, offset, and counters (`include/flashcheck/checkpoint.h:8-18`). `main()` restores the ID and offset without validating the target device, capacity, tested range, chunk size, or pattern in `src/main.c:186-195`.
 
-## Phased Remediation Plan
+**Impact:** Reusing a checkpoint after changing devices or test settings can make `stage_full()` skip the earlier range. A run may then pass without fully verifying the current device's claimed range.
 
-### Phase 1: Critical Safety, Concurrency & Memory Fixes (P0/P1)
-1. **Reset `t->cap` in `speed_mark`** ([`src/stats/stats.c`](../src/stats/stats.c)) — fixes 128 KiB heap overflow.
-2. **Implement directory scanning in `scan_holders`** ([`src/safety.c`](../src/safety.c)) — detects LVM, LUKS, and RAID devices.
-3. **Resolve paths with `realpath` in `safety_mount_matches`** ([`src/safety.c`](../src/safety.c)) — fixes symlink mount check bypass.
-4. **Relocate `attempt` counter in `loop_xfer`** ([`src/io/sync.c`](../src/io/sync.c)) — prevents infinite retry lockup on I/O errors.
-5. **Broadcast `cv_done` on shutdown in `gen_pool_destroy`** ([`src/scheduler/pool.c`](../src/scheduler/pool.c)) — prevents thread join deadlock.
-6. **Fix `-D_FILE_OFFSET_BITS=64` macro** ([`Makefile`](../Makefile)) — fixes 32-bit truncation.
+**Status:** Fixed in branch. Checkpoints now carry a SHA-256-derived device fingerprint, device ID and capacity, tested range, chunk size, pattern, and mode. Older, malformed, or mismatched checkpoints are rejected and the run starts from the beginning. Resume is disabled when the device does not provide a serial number for a stable fingerprint.
 
-### Phase 2: Signal Trapping & Core UX (P0/P1)
-1. **Wire `fc_interrupted` checks into all stage chunk loops** ([`src/test/*.c`](../src/test), [`src/scheduler/pipeline.c`](../src/scheduler/pipeline.c)).
-2. **Enrich destructive confirmation prompt** ([`src/safety.c`](../src/safety.c)) with device metadata and exact case-insensitive match.
-3. **Add ETA calculation and display** ([`src/report/visual.c`](../src/report/visual.c)).
-4. **Update `README.md` disk path recommendations and remove duplicates**.
-5. **Guard ANSI colors with `isatty()` and support `NO_COLOR`** ([`src/report/console.c`](../src/report/console.c)).
-6. **Show adaptive escalation notice in visual mode** ([`src/test/test.c`](../src/test/test.c)).
+### P2 — JSON report creation follows symlinks and defaults to world-readable
 
-### Phase 3: File Hardening & Polish (P1/P2)
-1. **Implement `json_write_str` escaping** ([`src/report/json.c`](../src/report/json.c), [`src/device/device.c`](../src/device/device.c)).
-2. **Re-check mount state after user confirmation** ([`src/safety.c`](../src/safety.c)).
-3. **Harden checkpoint and report creation** with `0600` and `O_NOFOLLOW | O_EXCL` ([`src/checkpoint.c`](../src/checkpoint.c)).
-4. **Throttle non-TTY progress output** ([`src/report/visual.c`](../src/report/visual.c)).
-5. **Add `-y` flag and concise typo error message** ([`src/cli.c`](../src/cli.c), [`src/main.c`](../src/main.c)).
+**Evidence:** `report_json()` opens the requested path with `O_CREAT | O_TRUNC` and mode `0644` in `src/report/json.c:84-99`.
+
+**Impact:** A privileged run can truncate a symlink target at the user-supplied report path. The resulting file can expose serial numbers and other device identifiers to local users.
+
+**Recommendation:** Create reports through a protected temporary file, reject symlinks, publish atomically, and use restrictive permissions such as `0600` unless the user explicitly requests broader access.
+
+### P2 — io_uring is not covered by normal pull-request CI
+
+**Evidence:** The Makefile enables io_uring only with `FLASHCHECK_IO_URING=1` (`Makefile:11-13`). The normal CI workflow builds the default backend; the release workflow enables io_uring on Linux.
+
+**Impact:** Changes to the optional Linux backend may merge without compiling or exercising that path in routine pull-request checks.
+
+**Recommendation:** Add a Linux pull-request CI job that compiles with `FLASHCHECK_IO_URING=1` and runs its tests. Keep a clear skip result when the runner's kernel does not permit io_uring.
+
+### P2 — README install example needs refreshing
+
+**Evidence:** The README download example at `README.md:33` pins version `0.2.0` and uses the `Avers/flashcheck` slug, while the linked releases page uses `Avers/flash-checker`; the audited build reports version `0.3.5`. This audit report has been refreshed with current P1 statuses.
+
+**Impact:** The copy/paste download command may lead to an obsolete release location.
+
+**Status:** Audit refreshed in this branch. The README release URL and version remain a follow-up recommendation.
+
+**Recommendation:** Keep one current audit report with finding status and dates. Update release instructions to match the repository's current release URL and derive the example version from the current published release.
+
+## Previously Reported Issues Rechecked
+
+The following earlier findings appear fixed in the current source: speed tracker capacity trimming (`src/stats/stats.c:27-42`), directory enumeration of top-level holders (`src/safety.c:148-159`), mount-source path resolution (`src/safety.c:67-100`), bounded sync retries (`src/io/sync.c:20-55`), pool shutdown broadcasts (`src/scheduler/pool.c:165-175`), 64-bit file offsets (`Makefile:4`), JSON string escaping (`src/report/json.c:8-33`), exact confirmation matching and a second mount check after the prompt (`src/safety.c:285-324`), and interrupt exit status 130 (`src/main.c:221-227`).
+
+The five P1 findings described above are addressed in the current branch; the P2 recommendations remain open.
+
+## Verification
+
+- `make clean && make && make test`: passed.
+- Unit suite: 374 checks, 0 failures.
+- CLI smoke checks: passed.
+- No physical block device was accessed.
+- The default test build does not enable io_uring. `FLASHCHECK_IO_URING=1` also compiled and passed tests; runtime io_uring tests were skipped because this kernel does not support io_uring.
+- macOS-specific APFS behavior was not exercised in this Linux environment.
+- No physical block device was accessed while implementing or verifying these changes.

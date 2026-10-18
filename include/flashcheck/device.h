@@ -9,6 +9,7 @@ typedef struct {
     char path[DEV_STR];
     char name[64];
     uint64_t capacity;
+    uint64_t device_id;
     uint32_t logical_sector;
     uint32_t physical_sector;
     int removable;
@@ -23,6 +24,8 @@ typedef struct {
 } device_info;
 
 int device_probe(const char *path, device_info *out, char *err, size_t errn);
+int device_validate_fd(int fd, const device_info *expected, char *err, size_t errn);
+uint64_t device_fingerprint(const device_info *device);
 const char *device_basename(const char *path);
 void device_print_info(const device_info *d);
 void device_json(const device_info *d, void *ctx, int indent);
