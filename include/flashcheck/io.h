@@ -29,6 +29,8 @@ struct io_ops {
     void (*close)(io_ops *o);
     io_stats *stats;
     const char *name;
+    int safety_fd;
+    uint64_t device_id;
 };
 
 io_ops *io_sync_open(const char *path, int writable, int want_direct, uint64_t capacity,

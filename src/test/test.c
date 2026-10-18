@@ -72,6 +72,8 @@ verdict run_verdict(const run_ctx *c)
         io_err += c->st[i].io_errors;
         mism += c->st[i].chunks_failed;
     }
+    if (fc_interrupted)
+        return VERDICT_INCONCLUSIVE;
     if (mism > 0)
         return VERDICT_FAIL;
     if (io_err > 0)
@@ -115,24 +117,32 @@ int run_execute(run_ctx *c)
     r = stage_new(c, "benchmark");
     if (stage_benchmark(c, r) < 0)
         return -1;
+    if (fc_interrupted)
+        return 0;
     if (r->io_errors > 0)
         return 0;
 
     r = stage_new(c, "sparse-probe");
     if (stage_sparse(c, r) < 0)
         return -1;
+    if (fc_interrupted)
+        return 0;
     if (r->chunks_failed > 0 || m == MODE_QUICK)
         return 0;
 
     r = stage_new(c, "retention");
     if (stage_retention(c, r) < 0)
         return -1;
+    if (fc_interrupted)
+        return 0;
     if (r->chunks_failed > 0)
         return 0;
 
     r = stage_new(c, "capacity-boundary");
     if (stage_boundary(c, r) < 0)
         return -1;
+    if (fc_interrupted)
+        return 0;
     if (r->has_capacity) {
         c->reliable_capacity = r->reliable_capacity;
         c->has_capacity = 1;

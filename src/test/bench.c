@@ -37,6 +37,8 @@ int bench_run(run_ctx *c)
     }
 
     for (off = start; off < bend; off += c->pl.chunk) {
+        if (fc_interrupted)
+            break;
         if (off + c->pl.chunk < bend)
             pipeline_prefetch(&c->pl, off + c->pl.chunk, 0);
         if (pipeline_write(&c->pl, off, 0, &st) != 0)
@@ -46,11 +48,15 @@ int bench_run(run_ctx *c)
         stage_progress("write", st.bytes_written, bend - start,
                        w.total_bytes / FC_MAX(w.last_ms - w.start_ms, 1) * 1000.0);
     }
+    if (fc_interrupted)
+        goto interrupted;
     if (pipeline_flush(&c->pl, &st) != 0)
         goto io_error;
 
     visual_stage_step(); /* read pass is its own numbered step */
     for (off = start; off < bend; off += c->pl.chunk) {
+        if (fc_interrupted)
+            break;
         if (off + c->pl.chunk < bend)
             pipeline_prefetch(&c->pl, off + c->pl.chunk, 0);
         if (pipeline_verify(&c->pl, off, 0, &st) != 0 && st.io_errors > 0)
@@ -79,6 +85,13 @@ int bench_run(run_ctx *c)
         snprintf(r->note, sizeof r->note, "read-back did not match what was written");
         return 1;
     }
+    return 0;
+
+interrupted:
+    visual_stage_end();
+    snprintf(r->note, sizeof r->note, "interrupted");
+    speed_free(&w);
+    speed_free(&rd);
     return 0;
 
 io_error:

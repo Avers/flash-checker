@@ -14,6 +14,7 @@
 
 #include "flashcheck/io.h"
 #include "flashcheck/report.h"
+#include "flashcheck/sha256.h"
 #include "flashcheck/util.h"
 
 #ifdef __linux__
@@ -121,6 +122,14 @@ int device_probe(const char *path, device_info *d, char *err, size_t errn)
         snprintf(err, errn, "cannot open %s: %s", path, strerror(errno));
         return -1;
     }
+    if (fstat(fd, &st) != 0 || !S_ISBLK(st.st_mode)) {
+        int saved = errno != 0 ? errno : ENODEV;
+        close(fd);
+        snprintf(err, errn, "%s is no longer a block device", path);
+        errno = saved;
+        return -1;
+    }
+    d->device_id = (uint64_t)st.st_rdev;
     d->capacity = 0;
     d->logical_sector = 0;
     d->physical_sector = 0;
@@ -190,6 +199,65 @@ int device_probe(const char *path, device_info *d, char *err, size_t errn)
 
     io_sync_probe_direct(path, &d->direct_supported, &e);
     return 0;
+}
+
+int device_validate_fd(int fd, const device_info *expected, char *err, size_t errn)
+{
+    struct stat st;
+    uint64_t capacity = 0;
+
+    if (fd < 0 || fstat(fd, &st) != 0 || !S_ISBLK(st.st_mode) ||
+        (uint64_t)st.st_rdev != expected->device_id) {
+        snprintf(err, errn, "opened device identity changed since it was inspected");
+        return -1;
+    }
+#ifdef __APPLE__
+    {
+        uint32_t block_size = 0;
+        uint64_t block_count = 0;
+        if (ioctl(fd, DKIOCGETBLOCKSIZE, &block_size) != 0 ||
+            ioctl(fd, DKIOCGETBLOCKCOUNT, &block_count) != 0 || block_size == 0) {
+            snprintf(err, errn, "cannot recheck capacity on the opened device");
+            return -1;
+        }
+        capacity = block_count * (uint64_t)block_size;
+    }
+#else
+    if (ioctl(fd, BLKGETSIZE64, &capacity) != 0) {
+        snprintf(err, errn, "cannot recheck capacity on the opened device");
+        return -1;
+    }
+#endif
+    if (capacity != expected->capacity) {
+        snprintf(err, errn, "device capacity changed since it was inspected");
+        return -1;
+    }
+    return 0;
+}
+
+uint64_t device_fingerprint(const device_info *d)
+{
+    sha256_ctx ctx;
+    uint8_t digest[32], number[8];
+
+    /* Without a serial, a reused major/minor and capacity cannot distinguish
+       a different removable device after reconnect. Such checkpoints must not
+       be eligible for resume. */
+    if (d->serial[0] == '\0')
+        return 0;
+    sha256_init(&ctx);
+    put_le64(number, d->device_id);
+    sha256_update(&ctx, number, sizeof number);
+    put_le64(number, d->capacity);
+    sha256_update(&ctx, number, sizeof number);
+    put_le64(number, d->logical_sector);
+    sha256_update(&ctx, number, sizeof number);
+    sha256_update(&ctx, d->vendor, strlen(d->vendor) + 1);
+    sha256_update(&ctx, d->model, strlen(d->model) + 1);
+    sha256_update(&ctx, d->serial, strlen(d->serial) + 1);
+    sha256_update(&ctx, d->usb_vidpid, strlen(d->usb_vidpid) + 1);
+    sha256_final(&ctx, digest);
+    return get_le64(digest);
 }
 
 static const char *na(const char *s) { return (s != NULL && s[0] != '\0') ? s : "n/a"; }

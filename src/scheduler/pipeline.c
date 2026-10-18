@@ -7,6 +7,20 @@ _Static_assert(PIPELINE_BATCH_MAX >= GEN_POOL_MAX_DEPTH,
 
 static int drain_writes(pipeline *p, stage_stats *st);
 
+static void discard_writes(pipeline *p, stage_stats *st)
+{
+    for (int i = 0; i < p->npend; i++) {
+        gen_pool_release(p->pool, p->pend[i].buf);
+        if (st != NULL) {
+            if (st->chunks_written > 0)
+                st->chunks_written--;
+            if (st->bytes_written >= p->pend[i].len)
+                st->bytes_written -= p->pend[i].len;
+        }
+    }
+    p->npend = 0;
+}
+
 int pipeline_init(pipeline *p, io_ops *io, uint64_t chunk, pattern_kind kind, uint64_t test_id,
                   uint64_t capacity, int depth, char *err, size_t errn)
 {
@@ -45,8 +59,12 @@ void pipeline_free(pipeline *p)
     if (p->npend > 0) {
         stage_stats st;
 
-        stage_stats_reset(&st);
-        drain_writes(p, &st);
+        if (fc_interrupted) {
+            discard_writes(p, NULL);
+        } else {
+            stage_stats_reset(&st);
+            drain_writes(p, &st);
+        }
     }
     gen_pool_destroy(p->pool);
     free(p->got);
@@ -90,6 +108,10 @@ static int drain_writes(pipeline *p, stage_stats *st)
 
     if (p->npend == 0)
         return 0;
+    if (fc_interrupted) {
+        discard_writes(p, st);
+        return -EINTR;
+    }
 
     for (i = 0; i < p->npend; i++) {
         segs[i].buf = p->pend[i].buf;
@@ -135,6 +157,9 @@ static int write_one(pipeline *p, uint64_t off, uint32_t pass, size_t len, stage
 int pipeline_write(pipeline *p, uint64_t off, uint32_t pass, stage_stats *st)
 {
     size_t len = pipeline_len(p, off);
+
+    if (fc_interrupted)
+        return -EINTR;
 
     p->rd_n = 0;
     if (p->wbatch == 0)
@@ -294,6 +319,8 @@ int pipeline_verify(pipeline *p, uint64_t off, uint32_t pass, stage_stats *st)
 
 int pipeline_flush(pipeline *p, stage_stats *st)
 {
+    if (fc_interrupted)
+        return -EINTR;
     if (p->npend > 0 && drain_writes(p, st) != 0)
         return -1;
     return p->io->flush(p->io);

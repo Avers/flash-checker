@@ -54,7 +54,6 @@ int main(int argc, char **argv)
     run_ctx ctx;
     checkpoint cp;
     int rc;
-    int lock_fd = -1;
     verdict v;
 
     memset(&cp, 0, sizeof cp);
@@ -129,13 +128,6 @@ int main(int argc, char **argv)
         if (cfg.want_direct < 0)
             cfg.want_direct = dev.direct_supported;
 
-        if (cfg.mode != MODE_IDENTIFY) {
-            if (safety_check(&cfg, &dev, -1, err, sizeof err) != 0) {
-                log_err("%s", err);
-                return EXIT_USAGE;
-            }
-        }
-
         if (cfg.io_backend == IO_BACKEND_URING) {
 #ifdef FLASHCHECK_IO_URING
             io = io_uring_open(dev.path, cfg.mode != MODE_IDENTIFY, cfg.want_direct, dev.capacity,
@@ -159,15 +151,32 @@ int main(int argc, char **argv)
             log_err("cannot open %s: %s", dev.path, errno_str(rc));
             return EXIT_IOERROR;
         }
-        lock_fd = open(dev.path, O_RDONLY | O_CLOEXEC);
-        if (lock_fd < 0) {
-            log_err("cannot open %s: %s", dev.path, errno_str(errno));
-            return EXIT_IOERROR;
-        }
-        if (safety_lock_device(lock_fd) != 0) {
-            log_err("another %s instance seems to be running on %s (%s)", FC_PROG, dev.path,
-                    errno_str(errno));
+        err[0] = '\0';
+        if (device_validate_fd(io->safety_fd, &dev, err, sizeof err) != 0 ||
+            io->device_id != dev.device_id) {
+            log_err("%s", err[0] != '\0' ? err : "opened device identity is inconsistent");
+            io->close(io);
             return EXIT_USAGE;
+        }
+        if (cfg.mode != MODE_IDENTIFY) {
+            char detail[512];
+            if (safety_check(&cfg, &dev, io->safety_fd, err, sizeof err) != 0) {
+                log_err("%s", err);
+                io->close(io);
+                return EXIT_USAGE;
+            }
+            if (safety_lock_device(io->safety_fd) != 0) {
+                log_err("another %s instance seems to be running on %s (%s)", FC_PROG,
+                        dev.path, errno_str(errno));
+                io->close(io);
+                return EXIT_USAGE;
+            }
+            if (safety_is_mounted_fd(io->safety_fd, dev.path, detail, sizeof detail) != 0) {
+                log_err("refusing to write after locking: device is in use or cannot be checked (%s)",
+                        detail);
+                io->close(io);
+                return EXIT_USAGE;
+            }
         }
         if (cfg.dry_run) {
             safety_plan(&cfg, &dev);
@@ -184,14 +193,18 @@ int main(int argc, char **argv)
     ctx.test_id = random_test_id();
     ctx.checkpoint_path = cfg.checkpoint_path;
     if (cfg.resume && cfg.checkpoint_path != NULL) {
-        if (checkpoint_load(cfg.checkpoint_path, &cp) == 0) {
+        if (checkpoint_load(cfg.checkpoint_path, &cp) == 0 &&
+            strcmp(cp.stage, "full-verify") == 0 &&
+            checkpoint_matches(&cp, dev.device_id, device_fingerprint(&dev), dev.capacity,
+                               cfg.offset, cfg.limit,
+                               cfg.chunk_size, cfg.pattern, cfg.mode)) {
             ctx.test_id = cp.test_id != 0 ? cp.test_id : ctx.test_id;
             ctx.resume_off = cp.offset;
             if (strcmp(cp.stage, "full-verify") == 0 && cp.complete)
                 ctx.resume_off = 0;
         } else {
-            log_warn("no usable checkpoint at %s, starting from the beginning",
-                     cfg.checkpoint_path);
+            log_warn("checkpoint at %s is missing, invalid, or does not match this device and "
+                     "test configuration; starting from the beginning", cfg.checkpoint_path);
         }
     }
 
@@ -222,21 +235,15 @@ int main(int argc, char **argv)
         log_warn("interrupted by signal: progress checkpoint written if --checkpoint was used");
         pipeline_free(&ctx.pl);
         io->close(io);
-        if (lock_fd >= 0)
-            close(lock_fd);
         return 128 + SIGINT;
     }
     if (rc < 0) {
         pipeline_free(&ctx.pl);
         io->close(io);
-        if (lock_fd >= 0)
-            close(lock_fd);
         return EXIT_IOERROR;
     }
     pipeline_free(&ctx.pl);
     io->close(io);
-    if (lock_fd >= 0)
-        close(lock_fd);
     if (action == CLI_ACTION_BENCH)
         return rc == 1 ? EXIT_FAIL : EXIT_OK;
     if (cfg.mode == MODE_IDENTIFY)

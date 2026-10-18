@@ -4,6 +4,18 @@
 #include "flashcheck/util.h"
 #include "flashcheck/visual.h"
 
+static void checkpoint_metadata(checkpoint *cp, const run_ctx *c)
+{
+    cp->device_id = c->dev->device_id;
+    cp->device_fingerprint = device_fingerprint(c->dev);
+    cp->capacity = c->dev->capacity;
+    cp->tested_start = c->cfg->offset;
+    cp->tested_limit = c->cfg->limit;
+    cp->chunk_size = c->cfg->chunk_size;
+    cp->pattern = c->cfg->pattern;
+    cp->mode = c->cfg->mode;
+}
+
 int stage_full(run_ctx *c, stage_report *r)
 {
     stage_stats st;
@@ -13,6 +25,7 @@ int stage_full(run_ctx *c, stage_report *r)
     uint64_t window_chunks = c->cfg->window_size / c->pl.chunk;
     uint64_t off;
     uint64_t resume = c->resume_off;
+    uint64_t checkpoint_off;
     uint64_t last_cp = now_ms();
     int failed = 0;
     char sz[64];
@@ -23,6 +36,7 @@ int stage_full(run_ctx *c, stage_report *r)
     speed_init(&rd);
     if (window_chunks == 0)
         window_chunks = 1;
+    checkpoint_off = start;
 
     if (!visual_is_enabled()) {
         log_out("");
@@ -51,7 +65,9 @@ int stage_full(run_ctx *c, stage_report *r)
             cp.bytes_written = st.bytes_written;
             cp.bytes_verified = st.bytes_verified;
             cp.errors = st.io_errors;
+            checkpoint_metadata(&cp, c);
             checkpoint_save(c->checkpoint_path, &cp);
+            checkpoint_off = off;
             break;
         }
         for (o = off; o < wend; o += c->pl.chunk) {
@@ -64,7 +80,10 @@ int stage_full(run_ctx *c, stage_report *r)
             speed_mark(&w, st.bytes_written);
         }
         if (fc_interrupted)
+        {
+            checkpoint_off = off;
             break;
+        }
         if (pipeline_flush(&c->pl, &st) != 0)
             goto io_error;
         for (o = off; o < wend; o += c->pl.chunk) {
@@ -80,13 +99,17 @@ int stage_full(run_ctx *c, stage_report *r)
             speed_mark(&rd, st.bytes_verified);
             visual_mark(o, VISUAL_OK);
         }
+        if (fc_interrupted) {
+            checkpoint_off = off;
+            break;
+        }
         {
             double bps = 0;
             if (w.last_ms > w.start_ms)
                 bps = w.total_bytes / (double)(w.last_ms - w.start_ms) * 1000.0;
             stage_progress("verify", st.bytes_written, end - start, bps);
         }
-        if (now_ms() - last_cp > 5000) {
+        if (!failed && now_ms() - last_cp > 5000) {
             memset(&cp, 0, sizeof cp);
             snprintf(cp.stage, sizeof cp.stage, "full-verify");
             cp.test_id = c->test_id;
@@ -94,9 +117,11 @@ int stage_full(run_ctx *c, stage_report *r)
             cp.bytes_written = st.bytes_written;
             cp.bytes_verified = st.bytes_verified;
             cp.errors = st.io_errors;
+            checkpoint_metadata(&cp, c);
             if (checkpoint_save(c->checkpoint_path, &cp) == 0)
                 last_cp = now_ms();
         }
+        checkpoint_off = failed ? off : wend;
         if (failed)
             break;
     }
@@ -122,11 +147,12 @@ int stage_full(run_ctx *c, stage_report *r)
     memset(&cp, 0, sizeof cp);
     snprintf(cp.stage, sizeof cp.stage, "full-verify");
     cp.test_id = c->test_id;
-    cp.offset = end;
+    cp.offset = (!fc_interrupted && !failed) ? end : checkpoint_off;
     cp.bytes_written = st.bytes_written;
     cp.bytes_verified = st.bytes_verified;
     cp.errors = st.io_errors;
-    cp.complete = !failed;
+    checkpoint_metadata(&cp, c);
+    cp.complete = !fc_interrupted && !failed && checkpoint_off >= end;
     checkpoint_save(c->checkpoint_path, &cp);
     speed_free(&w);
     speed_free(&rd);
@@ -138,6 +164,15 @@ io_error:
     r->has_first_fail = st.has_first_fail;
     r->first_fail_off = st.first_fail_off;
     snprintf(r->note, sizeof r->note, "I/O error");
+    memset(&cp, 0, sizeof cp);
+    snprintf(cp.stage, sizeof cp.stage, "full-verify");
+    cp.test_id = c->test_id;
+    cp.offset = checkpoint_off;
+    cp.bytes_written = st.bytes_written;
+    cp.bytes_verified = st.bytes_verified;
+    cp.errors = st.io_errors;
+    checkpoint_metadata(&cp, c);
+    checkpoint_save(c->checkpoint_path, &cp);
     speed_free(&w);
     speed_free(&rd);
     return -1;

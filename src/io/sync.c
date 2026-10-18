@@ -32,8 +32,11 @@ static int loop_xfer(int fd, void *buf, uint64_t off, size_t len, int is_write)
                     n = pwrite(fd, p + done, len - done, (off_t)(off + done));
                 else
                     n = pread(fd, p + done, len - done, (off_t)(off + done));
-                if (n < 0 && errno == EINTR)
+                if (n < 0 && errno == EINTR) {
+                    if (fc_interrupted)
+                        return -EINTR;
                     continue;
+                }
                 break;
             }
             if (n >= 0)
@@ -166,6 +169,18 @@ io_ops *io_sync_open(const char *path, int writable, int want_direct, uint64_t c
         }
     }
 
+    if (fd_buf >= 0) {
+        struct stat a, b;
+        if (fstat(fd, &a) != 0 || fstat(fd_buf, &b) != 0 ||
+            (S_ISBLK(a.st_mode) && (!S_ISBLK(b.st_mode) || a.st_rdev != b.st_rdev)) ||
+            (!S_ISBLK(a.st_mode) && (a.st_dev != b.st_dev || a.st_ino != b.st_ino))) {
+            close(fd);
+            close(fd_buf);
+            *err = ESTALE;
+            return NULL;
+        }
+    }
+
     s = xalloc(sizeof *s);
     s->fd = fd;
     s->fd_buf = fd_buf;
@@ -179,6 +194,12 @@ io_ops *io_sync_open(const char *path, int writable, int want_direct, uint64_t c
     s->ops.stats->direct_active = direct_active;
     s->ops.stats->capacity = capacity;
     s->ops.name = "sync";
+    s->ops.safety_fd = fd;
+    {
+        struct stat st;
+        s->ops.device_id = fstat(fd, &st) == 0 && S_ISBLK(st.st_mode)
+                               ? (uint64_t)st.st_rdev : 0;
+    }
     return &s->ops;
 }
 

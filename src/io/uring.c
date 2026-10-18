@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -617,6 +618,18 @@ io_ops *io_uring_open(const char *path, int writable, int want_direct, uint64_t 
         return NULL;
     }
 
+    if (fd_buf >= 0) {
+        struct stat a, b;
+        if (fstat(fd, &a) != 0 || fstat(fd_buf, &b) != 0 ||
+            (S_ISBLK(a.st_mode) && (!S_ISBLK(b.st_mode) || a.st_rdev != b.st_rdev)) ||
+            (!S_ISBLK(a.st_mode) && (a.st_dev != b.st_dev || a.st_ino != b.st_ino))) {
+            close(fd);
+            close(fd_buf);
+            *err = ESTALE;
+            return NULL;
+        }
+    }
+
     memset(&params, 0, sizeof params);
     ring_fd = uring_setup(URING_ENTRIES, &params);
     if (ring_fd < 0) {
@@ -653,6 +666,12 @@ io_ops *io_uring_open(const char *path, int writable, int want_direct, uint64_t 
     u->ops.flush = uring_flush;
     u->ops.close = uring_close;
     u->ops.name = "io_uring";
+    u->ops.safety_fd = fd;
+    {
+        struct stat st;
+        u->ops.device_id = fstat(fd, &st) == 0 && S_ISBLK(st.st_mode)
+                               ? (uint64_t)st.st_rdev : 0;
+    }
 
     return &u->ops;
 }
