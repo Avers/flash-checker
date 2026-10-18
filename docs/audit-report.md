@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-The five P1 findings below have been addressed in the `ai/critical-audit-fixes` branch. The implementation now reports interrupted runs as `INCONCLUSIVE`, checks layered storage relationships, binds safety checks and locking to the opened device descriptor, stops unsubmitted writes on interruption, and validates checkpoint device and run identity. The P2 findings remain open.
+The five P1 findings below and all three P2 findings have been addressed in the `ai/critical-audit-fixes` branch. The implementation now reports interrupted runs as `INCONCLUSIVE`, checks layered storage relationships, binds safety checks and locking to the opened device descriptor, stops unsubmitted writes on interruption, validates checkpoint device and run identity, writes JSON reports atomically with symlink protection and private permissions, builds and tests the optional io_uring backend in pull request CI, and uses the current repository slug and version in its binary installation example.
 
 | Priority | Finding | Impact |
 |---|---|---|
@@ -15,9 +15,9 @@ The five P1 findings below have been addressed in the `ai/critical-audit-fixes` 
 | P1 | Interrupt handling can continue issuing writes — fixed in branch | Ctrl+C could allow queued destructive I/O to continue |
 | P1 | Checkpoints are not bound to device or run settings — fixed in branch | Reusing a checkpoint could skip part of verification |
 | P1 | Device checks are path-based and can race the writable open — fixed in branch | A path change could cause safety checks to inspect a different target |
-| P2 | JSON report output follows symlinks and uses mode 0644 | Privileged runs can overwrite a symlink target; reports expose device identifiers |
-| P2 | Optional io_uring backend is absent from normal PR CI | Backend regressions may not be caught before release builds |
-| P2 | README install example is outdated | Readers may download an obsolete release from the wrong repository slug |
+| P2 | JSON report output follows symlinks and uses mode 0644 — fixed in branch | Privileged runs could overwrite a symlink target; reports could expose device identifiers |
+| P2 | Optional io_uring backend is absent from normal PR CI — fixed in branch | Backend regressions may not be caught before release builds |
+| P2 | README install example was outdated — fixed in branch | Readers could download an obsolete release from the wrong repository slug |
 
 ## Findings and Recommendations
 
@@ -61,42 +61,42 @@ The five P1 findings below have been addressed in the `ai/critical-audit-fixes` 
 
 **Status:** Fixed in branch. Checkpoints now carry a SHA-256-derived device fingerprint, device ID and capacity, tested range, chunk size, pattern, and mode. Older, malformed, or mismatched checkpoints are rejected and the run starts from the beginning. Resume is disabled when the device does not provide a serial number for a stable fingerprint.
 
-### P2 — JSON report creation follows symlinks and defaults to world-readable
+### P2 — JSON report creation followed symlinks and defaulted to world-readable
 
-**Evidence:** `report_json()` opens the requested path with `O_CREAT | O_TRUNC` and mode `0644` in `src/report/json.c:84-99`.
+**Evidence:** `report_json()` now creates a same-directory temporary file with mode `0600`, flushes it, and publishes it with `rename()`. It checks the destination with `lstat()` and rejects symbolic links. `tests/test_report.c` verifies symlink rejection, target preservation, and private file permissions.
 
 **Impact:** A privileged run can truncate a symlink target at the user-supplied report path. The resulting file can expose serial numbers and other device identifiers to local users.
 
-**Recommendation:** Create reports through a protected temporary file, reject symlinks, publish atomically, and use restrictive permissions such as `0600` unless the user explicitly requests broader access.
+**Status:** Fixed in branch. Report output uses a protected temporary file, rejects symlink destinations, publishes atomically, and restricts permissions to `0600`.
 
-### P2 — io_uring is not covered by normal pull-request CI
+### P2 — io_uring was not covered by normal pull-request CI
 
-**Evidence:** The Makefile enables io_uring only with `FLASHCHECK_IO_URING=1` (`Makefile:11-13`). The normal CI workflow builds the default backend; the release workflow enables io_uring on Linux.
+**Evidence:** The Makefile enables io_uring only with `FLASHCHECK_IO_URING=1` (`Makefile:11-13`). The CI workflow now includes an Ubuntu job that builds and runs the test suite with io_uring enabled. Backend tests print a skip when the runner kernel does not permit io_uring.
 
 **Impact:** Changes to the optional Linux backend may merge without compiling or exercising that path in routine pull-request checks.
 
-**Recommendation:** Add a Linux pull-request CI job that compiles with `FLASHCHECK_IO_URING=1` and runs its tests. Keep a clear skip result when the runner's kernel does not permit io_uring.
+**Status:** Fixed in branch. Pull request CI compiles and tests the io_uring backend on Ubuntu, with an explicit skip for unsupported runner kernels.
 
-### P2 — README install example needs refreshing
+### P2 — README install example used an obsolete release location
 
-**Evidence:** The README download example at `README.md:33` pins version `0.2.0` and uses the `Avers/flashcheck` slug, while the linked releases page uses `Avers/flash-checker`; the audited build reports version `0.3.5`. This audit report has been refreshed with current P1 statuses.
+**Evidence:** The README download example now uses `Avers/flash-checker`, the current `VERSION` value, and the asset naming pattern in `.github/workflows/release.yml`.
 
-**Impact:** The copy/paste download command may lead to an obsolete release location.
+**Impact:** The old copy/paste download command could lead to an obsolete release location.
 
-**Status:** Audit refreshed in this branch. The README release URL and version remain a follow-up recommendation.
-
-**Recommendation:** Keep one current audit report with finding status and dates. Update release instructions to match the repository's current release URL and derive the example version from the current published release.
+**Status:** Fixed in branch. The release URL uses the correct repository slug, and the example version matches the project `VERSION` file.
 
 ## Previously Reported Issues Rechecked
 
 The following earlier findings appear fixed in the current source: speed tracker capacity trimming (`src/stats/stats.c:27-42`), directory enumeration of top-level holders (`src/safety.c:148-159`), mount-source path resolution (`src/safety.c:67-100`), bounded sync retries (`src/io/sync.c:20-55`), pool shutdown broadcasts (`src/scheduler/pool.c:165-175`), 64-bit file offsets (`Makefile:4`), JSON string escaping (`src/report/json.c:8-33`), exact confirmation matching and a second mount check after the prompt (`src/safety.c:285-324`), and interrupt exit status 130 (`src/main.c:221-227`).
 
-The five P1 findings described above are addressed in the current branch; the P2 recommendations remain open.
+The five P1 findings and all three P2 findings are addressed in the current branch.
 
 ## Verification
 
 - `make clean && make && make test`: passed.
-- Unit suite: 374 checks, 0 failures.
+- `make debug`: passed.
+- `make asan`: passed.
+- Unit suite: 390 checks, 0 failures.
 - CLI smoke checks: passed.
 - No physical block device was accessed.
 - The default test build does not enable io_uring. `FLASHCHECK_IO_URING=1` also compiled and passed tests; runtime io_uring tests were skipped because this kernel does not support io_uring.

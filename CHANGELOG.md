@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security / Fixed
+- JSON reports now reject symlink destinations, publish atomically, and use
+  private mode `0600`
+
+### CI / Added
+- Pull request CI now builds and tests the optional Linux io_uring backend
+
+### Documentation / Updated
+- Binary installation example now uses the current repository slug, version,
+  and release asset naming
+
 ## [0.3.5] - 2026-10-13
 
 ### Security / Fixed

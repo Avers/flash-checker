@@ -7,6 +7,18 @@ on:
     branches: [main]
 
 jobs:
+  io-uring:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test with io_uring enabled
+        run: |
+          make clean
+          make FLASHCHECK_IO_URING=1
+          make build/flashcheck-tests FLASHCHECK_IO_URING=1
+          ./build/flashcheck-tests
+
   build-and-test:
     runs-on: ubuntu-24.04
     strategy:
