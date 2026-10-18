@@ -309,6 +309,19 @@ int safety_is_mounted(const char *path, char *detail, size_t dn)
 }
 
 #ifdef __linux__
+static int append_sysfs_path(char *dst, size_t dstn, const char *base,
+                             const char *suffix)
+{
+    size_t base_len = strlen(base);
+    size_t suffix_len = strlen(suffix);
+
+    if (base_len >= dstn || suffix_len >= dstn - base_len)
+        return -1;
+    memcpy(dst, base, base_len);
+    memcpy(dst + base_len, suffix, suffix_len + 1);
+    return 0;
+}
+
 static int add_sysfs_node(char nodes[][PATH_MAX], size_t *count, const char *path)
 {
     char resolved[PATH_MAX];
@@ -340,7 +353,10 @@ static int linux_topology_in_use(dev_t id, char *detail, size_t dn)
     {
         char part[PATH_MAX], disk[PATH_MAX];
         FILE *f;
-        snprintf(part, sizeof part, "%s/partition", nodes[0]);
+        if (append_sysfs_path(part, sizeof part, nodes[0], "/partition") != 0) {
+            snprintf(detail, dn, "device path is too long to inspect safely");
+            return -1;
+        }
         snprintf(disk, sizeof disk, "%s", nodes[0]);
         f = fopen(part, "r");
         if (f != NULL) {
@@ -372,9 +388,16 @@ static int linux_topology_in_use(dev_t id, char *detail, size_t dn)
                 if (ent->d_name[0] == '.')
                     continue;
                 if (snprintf(child, sizeof child, "%s/%s", disk, ent->d_name) >=
-                    (int)sizeof child)
-                    continue;
-                snprintf(marker, sizeof marker, "%s/partition", child);
+                    (int)sizeof child) {
+                    closedir(d);
+                    snprintf(detail, dn, "device topology path is too long to inspect safely");
+                    return -1;
+                }
+                if (append_sysfs_path(marker, sizeof marker, child, "/partition") != 0) {
+                    closedir(d);
+                    snprintf(detail, dn, "device topology path is too long to inspect safely");
+                    return -1;
+                }
                 if (access(marker, F_OK) == 0 && add_sysfs_node(nodes, &count, child) != 0) {
                     closedir(d);
                     snprintf(detail, dn, "device topology is too large to inspect safely");
