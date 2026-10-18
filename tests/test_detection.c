@@ -273,6 +273,14 @@ static void test_checkpoint(void)
     a.bytes_written = 999;
     a.bytes_verified = 888;
     a.errors = 0;
+    a.device_id = 123;
+    a.device_fingerprint = 456;
+    a.capacity = 1u << 20;
+    a.tested_start = 0;
+    a.tested_limit = 0;
+    a.chunk_size = 4096;
+    a.pattern = 1;
+    a.mode = MODE_FULL;
     a.complete = 0;
     CHECK_EQ_U64(checkpoint_save(path, &a), 0);
     CHECK_EQ_U64(checkpoint_load(path, &b), 0);
@@ -282,6 +290,15 @@ static void test_checkpoint(void)
     CHECK_EQ_U64(b.bytes_written, 999);
     CHECK_EQ_U64(b.bytes_verified, 888);
     CHECK_EQ_U64(b.complete, 0);
+    CHECK_EQ_U64(b.device_id, 123);
+    CHECK_EQ_U64(b.device_fingerprint, 456);
+    CHECK_EQ_U64(b.capacity, 1u << 20);
+    CHECK(checkpoint_matches(&b, 123, 456, 1u << 20, 0, 0, 4096, 1, MODE_FULL));
+    CHECK(!checkpoint_matches(&b, 124, 456, 1u << 20, 0, 0, 4096, 1, MODE_FULL));
+    CHECK(!checkpoint_matches(&b, 123, 789, 1u << 20, 0, 0, 4096, 1, MODE_FULL));
+    CHECK(!checkpoint_matches(&b, 123, 456, 1u << 20, 0, 0, 4096, 2, MODE_FULL));
+    b.offset = (1u << 20) + 4096;
+    CHECK(!checkpoint_matches(&b, 123, 456, 1u << 20, 0, 0, 4096, 1, MODE_FULL));
     unlink(path);
     T_BEGIN("missing checkpoint reports failure");
     CHECK(checkpoint_load("/tmp/flashcheck-does-not-exist-12345", &b) != 0);
@@ -352,9 +369,19 @@ static void test_verdict(void)
 
     T_BEGIN("identify never reports a verdict");
     CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
+    fc_interrupted = 1;
+    cfg.mode = MODE_FULL;
+    ctx.st[0].io_errors = 0;
+    ctx.tested_bytes = 1u << 20;
+    ctx.has_capacity = 1;
+    T_BEGIN("interrupted verification is inconclusive");
+    CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
+    fc_interrupted = 0;
 
     T_BEGIN("zero written bytes is never a pass");
     cfg.mode = MODE_STANDARD;
+    ctx.tested_bytes = 0;
+    ctx.has_capacity = 0;
     CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
 
     T_BEGIN("verified write passes");
