@@ -30,10 +30,11 @@ Silicon) are attached to every
 and no build tools needed:
 
 ```sh
-curl -LO https://github.com/Avers/flashcheck/releases/download/v0.2.0/flashcheck-0.2.0-linux-x86_64.tar.gz
-shasum -a 256 -c flashcheck-0.2.0-linux-x86_64.tar.gz.sha256   # verify
-tar xzf flashcheck-0.2.0-linux-x86_64.tar.gz
-sudo ./flashcheck-0.2.0-linux-x86_64/install.sh               # → /usr/local/bin/flashcheck
+VERSION=0.3.6
+curl -LO "https://github.com/Avers/flash-checker/releases/download/v${VERSION}/flashcheck-${VERSION}-linux-x86_64.tar.gz"
+shasum -a 256 -c "flashcheck-${VERSION}-linux-x86_64.tar.gz.sha256"   # verify
+tar xzf "flashcheck-${VERSION}-linux-x86_64.tar.gz"
+sudo "./flashcheck-${VERSION}-linux-x86_64/install.sh"               # → /usr/local/bin/flashcheck
 flashcheck --version
 ```
 

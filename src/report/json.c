@@ -1,6 +1,7 @@
 #include "flashcheck/report.h"
 
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "flashcheck/util.h"
@@ -81,22 +82,61 @@ static void json_stage(FILE *f, const stage_report *r)
     fprintf(f, "    }");
 }
 
+static int report_target_is_symlink(const char *path)
+{
+    struct stat st;
+
+    if (lstat(path, &st) == 0) {
+        if (S_ISLNK(st.st_mode)) {
+            errno = ELOOP;
+            return -1;
+        }
+        return 0;
+    }
+    return errno == ENOENT ? 0 : -1;
+}
+
 int report_json(const run_ctx *c, verdict v, const char *path)
 {
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-    FILE *f;
+    static const char suffix[] = ".tmp.XXXXXX";
+    int fd = -1, saved_errno;
+    FILE *f = NULL;
     char a[64], ev[512];
+    char *tmp = NULL;
+    size_t path_len;
 
-    if (fd < 0) {
+    if (path == NULL) {
+        errno = EINVAL;
+        log_warn("cannot write JSON report: invalid path");
+        return -1;
+    }
+    if (report_target_is_symlink(path) != 0) {
         log_warn("cannot write JSON report to %s: %s", path, strerror(errno));
         return -1;
+    }
+    path_len = strlen(path);
+    if (path_len > SIZE_MAX - sizeof suffix) {
+        errno = ENAMETOOLONG;
+        goto fail;
+    }
+    tmp = malloc(path_len + sizeof suffix);
+    if (tmp == NULL)
+        goto fail;
+    memcpy(tmp, path, path_len);
+    memcpy(tmp + path_len, suffix, sizeof suffix);
+    fd = mkstemp(tmp);
+    if (fd < 0)
+        goto fail;
+    if (fchmod(fd, S_IRUSR | S_IWUSR) != 0)
+        goto fail;
+    {
+        int flags = fcntl(fd, F_GETFD);
+        if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) != 0)
+            goto fail;
     }
     f = fdopen(fd, "w");
-    if (f == NULL) {
-        close(fd);
-        log_warn("cannot write JSON report to %s: %s", path, strerror(errno));
-        return -1;
-    }
+    if (f == NULL)
+        goto fail;
     fprintf(f, "{\n");
     fprintf(f, "  \"tool\": \"%s\",\n", FC_PROG);
     fprintf(f, "  \"version\": \"%s\",\n", FC_VERSION);
@@ -138,9 +178,31 @@ int report_json(const run_ctx *c, verdict v, const char *path)
     json_write_str(f, report_evidence(c, ev, sizeof ev));
     fprintf(f, "\n");
     fprintf(f, "}\n");
+    if (fflush(f) != 0 || fsync(fd) != 0)
+        goto fail;
     if (fclose(f) != 0) {
-        log_warn("error closing JSON report %s", path);
-        return -1;
+        f = NULL;
+        fd = -1;
+        goto fail;
     }
+    f = NULL;
+    fd = -1;
+    if (report_target_is_symlink(path) != 0 || rename(tmp, path) != 0)
+        goto fail;
+    free(tmp);
     return 0;
+
+fail:
+    saved_errno = errno;
+    if (f != NULL)
+        (void)fclose(f);
+    else if (fd >= 0)
+        (void)close(fd);
+    if (tmp != NULL) {
+        (void)unlink(tmp);
+        free(tmp);
+    }
+    log_warn("cannot write JSON report to %s: %s", path, strerror(saved_errno));
+    errno = saved_errno;
+    return -1;
 }
