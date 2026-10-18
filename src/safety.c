@@ -415,7 +415,11 @@ static int linux_topology_in_use(dev_t id, char *detail, size_t dn)
     for (size_t i = 0; i < count; i++) {
         char p[PATH_MAX], devnum[64];
         FILE *f;
-        snprintf(p, sizeof p, "%s/dev", nodes[i]);
+        if (append_sysfs_path(p, sizeof p, nodes[i], "/dev") != 0) {
+            fclose(mounts);
+            snprintf(detail, dn, "device topology path is too long to inspect safely");
+            return -1;
+        }
         f = fopen(p, "r");
         if (f == NULL || fgets(devnum, sizeof devnum, f) == NULL) {
             if (f != NULL)
