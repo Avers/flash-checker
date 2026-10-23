@@ -401,6 +401,8 @@ uint64_t pipeline_probes(uint64_t start, uint64_t end, uint64_t chunk, size_t ma
 
     if (cap == 0)
         return 0;
+    if (end <= start)
+        return 0;
     start = (start / chunk) * chunk;
     offs[n++] = start;
     for (d = chunk; n < cap && d <= span / 2; d *= 2) {

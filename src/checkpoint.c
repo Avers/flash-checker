@@ -10,7 +10,9 @@ static void cp_parse(const char *txt, checkpoint *cp)
     char stage[CP_STAGE_MAX] = { 0 };
     unsigned long long id = 0, off = 0, bw = 0, bv = 0, er = 0;
     unsigned long long dev = 0, fingerprint = 0, cap = 0, start = 0, limit = 0, chunk = 0;
+    unsigned long long passes = 0, pass = 0;
     int pattern = -1, mode = -1;
+    int phase = -1;
     double ws = 0, rs = 0;
     int complete = 0;
     const char *p = txt;
@@ -35,6 +37,9 @@ static void cp_parse(const char *txt, checkpoint *cp)
             } else if (sscanf(line, "tested_start=%llu", &start) == 1) {
             } else if (sscanf(line, "tested_limit=%llu", &limit) == 1) {
             } else if (sscanf(line, "chunk_size=%llu", &chunk) == 1) {
+            } else if (sscanf(line, "passes=%llu", &passes) == 1) {
+            } else if (sscanf(line, "pass=%llu", &pass) == 1) {
+            } else if (sscanf(line, "phase=%d", &phase) == 1) {
             } else if (sscanf(line, "pattern=%d", &pattern) == 1) {
             } else if (sscanf(line, "mode=%d", &mode) == 1) {
             } else if (sscanf(line, "write_sec=%lf", &ws) == 1) {
@@ -58,6 +63,9 @@ static void cp_parse(const char *txt, checkpoint *cp)
     cp->tested_start = start;
     cp->tested_limit = limit;
     cp->chunk_size = chunk;
+    cp->passes = passes;
+    cp->pass = pass;
+    cp->phase = phase;
     cp->pattern = pattern;
     cp->mode = mode;
     cp->write_sec = ws;
@@ -124,7 +132,8 @@ n = snprintf(txt, sizeof txt,
              "# %s %s\nstage=%s\ntest_id=%llu\noffset=%llu\nbytes_written=%llu\n"
              "bytes_verified=%llu\nerrors=%llu\ndevice_id=%llu\ndevice_fingerprint=%llu\n"
              "capacity=%llu\n"
-             "tested_start=%llu\ntested_limit=%llu\nchunk_size=%llu\npattern=%d\nmode=%d\n"
+             "tested_start=%llu\ntested_limit=%llu\nchunk_size=%llu\npasses=%llu\n"
+             "pass=%llu\nphase=%d\npattern=%d\nmode=%d\n"
              "write_sec=%.3f\nread_sec=%.3f\ncomplete=%d\n",
              FC_PROG, FC_VERSION, cp->stage, (unsigned long long)cp->test_id,
              (unsigned long long)cp->offset, (unsigned long long)cp->bytes_written,
@@ -132,7 +141,8 @@ n = snprintf(txt, sizeof txt,
              (unsigned long long)cp->device_id, (unsigned long long)cp->device_fingerprint,
              (unsigned long long)cp->capacity,
              (unsigned long long)cp->tested_start, (unsigned long long)cp->tested_limit,
-             (unsigned long long)cp->chunk_size, cp->pattern, cp->mode,
+             (unsigned long long)cp->chunk_size, (unsigned long long)cp->passes,
+             (unsigned long long)cp->pass, cp->phase, cp->pattern, cp->mode,
              cp->write_sec, cp->read_sec, cp->complete);
     if (n < 0 || (size_t)n >= sizeof txt || write(fd, txt, (size_t)n) != n) {
         close(fd);

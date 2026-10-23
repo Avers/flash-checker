@@ -18,6 +18,9 @@ typedef struct {
     uint64_t tested_start;
     uint64_t tested_limit;
     uint64_t chunk_size;
+    uint64_t passes;
+    uint64_t pass;
+    int phase;
     int pattern;
     int mode;
     double write_sec;

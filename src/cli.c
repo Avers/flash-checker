@@ -32,6 +32,7 @@ enum {
     OPT_IO_BACKEND,
     OPT_DEPTH,
     OPT_BENCH_RUN,
+    OPT_ESTIMATE_CAPACITY,
     OPT_HELP,
     OPT_VERSION
 };
@@ -48,11 +49,10 @@ void cli_usage(FILE *f, const char *prog)
             "  -i, --identify          only print device information, never writes;\n"
             "                         performs no test, reports no verdict, exits 0\n"
             "      --mode MODE         quick | standard | adaptive | full   (default: adaptive)\n"
-            "                         quick     benchmark + sparse probe; never certifies\n"
-            "                         standard  probe + retention + capacity search\n"
-            "                         adaptive  standard, then full write/read verify only\n"
-            "                                   when no counter-evidence was found\n"
-            "                         full      same stages as adaptive, explicit\n"
+            "                         quick     sparse probe only; never certifies\n"
+            "                         standard  sparse + retention + capacity estimate\n"
+            "                         adaptive  sparse probe + one full-range write/read\n"
+            "                         full      same certification as adaptive, explicit\n"
             "      --bench             measure device write/read speed; needs\n"
             "                         --destructive, prints no verdict (exit 1 if the\n"
             "                         read-back does not match)\n"
@@ -64,16 +64,18 @@ void cli_usage(FILE *f, const char *prog)
             "\n"
             "tuning:\n"
             "  -b, --block-size SIZE   region size, default 8MiB\n"
-            "  -w, --window SIZE       sliding window for full mode, default 1GiB\n"
+            "  -w, --window SIZE       flush/checkpoint window, default 1GiB\n"
             "  -n, --limit SIZE        only test the first SIZE bytes\n"
             "      --offset SIZE       start testing at SIZE\n"
-            "  -p, --passes N          retention passes, default 1\n"
+            "  -p, --passes N          full-range write/verify passes (standard: retention), default 1\n"
             "      --pattern KIND      chacha20 | prng | zero, default chacha20\n"
             "      --depth N           parallel data-generation depth 0-16, default 4\n"
             "                          (0 or 1 generates data inline, no helper thread)\n"
-            "      --bench-bytes SIZE  bytes used for the speed benchmark, default 256MiB\n"
-            "      --boundary-budget SIZE   max bytes for the capacity search, default 8GiB\n"
+            "      --bench-bytes SIZE  bytes used by --bench, default 256MiB\n"
+            "      --boundary-budget SIZE   max I/O bytes for capacity search, default 8GiB\n"
             "      --boundary-resolution SIZE  bisection step, default 64MiB\n"
+            "      --estimate-capacity   after a mismatch, also estimate the reliable boundary\n"
+            "                           (adds writes; standard mode estimates by default)\n"
             "      --direct/--no-direct     force or forbid O_DIRECT\n"
             "      --io-backend KIND     sync | uring, default sync\n"
             "                            (uring needs a FLASHCHECK_IO_URING=1 build)\n"
@@ -81,7 +83,7 @@ void cli_usage(FILE *f, const char *prog)
             "output:\n"
             "      --json FILE         write a JSON report\n"
             "      --checkpoint FILE   write progress checkpoints\n"
-            "      --resume             continue the full stage from a checkpoint\n"
+            "      --resume             continue the saved full-stage phase from a checkpoint\n"
             "  -v, --verbose           full detail (stages, rates, summary);\n"
             "                          default is one live progress line plus a short result\n"
             "  -h, --help              this text\n"
@@ -147,6 +149,7 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
         { "pattern", required_argument, NULL, OPT_PATTERN },
         { "depth", required_argument, NULL, OPT_DEPTH },
         { "bench-bytes", required_argument, NULL, OPT_BENCH },
+        { "estimate-capacity", no_argument, NULL, OPT_ESTIMATE_CAPACITY },
         { "boundary-budget", required_argument, NULL, OPT_BOUNDARY_BUDGET },
         { "boundary-resolution", required_argument, NULL, OPT_BOUNDARY_RES },
         { "json", required_argument, NULL, OPT_JSON },
@@ -176,6 +179,7 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
             break;
         case OPT_BENCH_RUN:
             *action = CLI_ACTION_BENCH;
+            c->benchmark_only = 1;
             break;
         case OPT_MODE:
             if (parse_mode_arg(optarg, c) != 0) {
@@ -236,6 +240,9 @@ int cli_parse(int argc, char **argv, config *c, cli_action *action, char *err,
             if (set_size_opt(optarg, "--boundary-resolution", &c->boundary_resolution, err,
                              errn) != 0)
                 return CLI_ERROR;
+            break;
+        case OPT_ESTIMATE_CAPACITY:
+            c->estimate_capacity = 1;
             break;
         case OPT_JSON:
             c->json_path = optarg;

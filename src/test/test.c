@@ -3,6 +3,8 @@
 #include "flashcheck/util.h"
 #include "flashcheck/visual.h"
 
+#include <limits.h>
+
 static uint64_t g_last_progress;
 
 stage_report *stage_new(run_ctx *c, const char *name)
@@ -82,9 +84,32 @@ verdict run_verdict(const run_ctx *c)
         return VERDICT_INCONCLUSIVE;
     if (c->cfg->mode == MODE_QUICK)
         return VERDICT_INCONCLUSIVE;
-    if (c->cfg->mode == MODE_STANDARD && !c->has_capacity)
+    if (c->cfg->mode == MODE_STANDARD)
+        return VERDICT_INCONCLUSIVE;
+    if (c->dev != NULL &&
+        (ctx_start(c) != 0 || ctx_end(c) < c->dev->capacity))
         return VERDICT_INCONCLUSIVE;
     return VERDICT_PASS;
+}
+
+static void stage_skipped(stage_report *r, const char *note)
+{
+    r->executed = 0;
+    snprintf(r->note, sizeof r->note, "%s", note);
+}
+
+static int run_boundary(run_ctx *c)
+{
+    stage_report *r = stage_new(c, "capacity-boundary");
+
+    if (stage_boundary(c, r) < 0)
+        return -1;
+    if (r->has_capacity) {
+        c->reliable_capacity = r->reliable_capacity;
+        c->has_capacity = r->reliable_capacity >= ctx_end(c) && ctx_start(c) == 0 &&
+                          ctx_end(c) == c->dev->capacity;
+    }
+    return 0;
 }
 
 int run_execute(run_ctx *c)
@@ -94,14 +119,16 @@ int run_execute(run_ctx *c)
 
     switch (m) {
     case MODE_QUICK:
-        visual_run_begin(3); /* bench-write, bench-read, sparse */
+        visual_run_begin(1); /* sparse */
         break;
     case MODE_STANDARD:
-        visual_run_begin(5); /* + retention-fill, boundary-probe */
+        visual_run_begin(3); /* sparse, retention, boundary-probe */
         break;
     case MODE_ADAPTIVE:
     case MODE_FULL:
-        visual_run_begin(6); /* + full-verify */
+        visual_run_begin(c->cfg->passes > (uint64_t)(INT_MAX - 1) / 2
+                             ? 0
+                             : (int)(1 + 2 * c->cfg->passes));
         break;
     default:
         visual_run_begin(0); /* identify: no progress */
@@ -115,52 +142,60 @@ int run_execute(run_ctx *c)
         return 0;
 
     r = stage_new(c, "benchmark");
-    if (stage_benchmark(c, r) < 0)
-        return -1;
-    if (fc_interrupted)
-        return 0;
-    if (r->io_errors > 0)
-        return 0;
+    stage_skipped(r, "not run automatically; use --bench for a speed measurement");
+
+    if (c->resume_valid && (m == MODE_ADAPTIVE || m == MODE_FULL)) {
+        r = stage_new(c, "sparse-probe");
+        stage_skipped(r, "not repeated while resuming full-range verification");
+        r = stage_new(c, "retention");
+        stage_skipped(r, "covered by the saved full-range write pass");
+        r = stage_new(c, "capacity-boundary");
+        stage_skipped(r, "not repeated while resuming full-range verification");
+        r = stage_new(c, "full-verify");
+        return stage_full(c, r);
+    }
 
     r = stage_new(c, "sparse-probe");
     if (stage_sparse(c, r) < 0)
         return -1;
     if (fc_interrupted)
         return 0;
-    if (r->chunks_failed > 0 || m == MODE_QUICK)
+    if (r->chunks_failed > 0) {
+        if (c->cfg->estimate_capacity && !fc_interrupted)
+            return run_boundary(c);
         return 0;
+    }
+    if (m == MODE_QUICK)
+        return 0;
+
+    if (m == MODE_STANDARD) {
+        r = stage_new(c, "retention");
+        if (stage_retention(c, r) < 0)
+            return -1;
+        if (fc_interrupted)
+            return 0;
+        if (r->chunks_failed > 0) {
+            if (c->cfg->estimate_capacity)
+                return run_boundary(c);
+            return 0;
+        }
+        if (run_boundary(c) < 0)
+            return -1;
+        return 0;
+    }
 
     r = stage_new(c, "retention");
-    if (stage_retention(c, r) < 0)
-        return -1;
-    if (fc_interrupted)
-        return 0;
-    if (r->chunks_failed > 0)
-        return 0;
-
+    stage_skipped(r, "covered by the global write-then-verify pass");
     r = stage_new(c, "capacity-boundary");
-    if (stage_boundary(c, r) < 0)
-        return -1;
-    if (fc_interrupted)
-        return 0;
-    if (r->has_capacity) {
-        c->reliable_capacity = r->reliable_capacity;
-        c->has_capacity = 1;
-        if (r->chunks_failed == 0 && c->dev != NULL &&
-            (ctx_start(c) != 0 || ctx_end(c) < c->dev->capacity))
-            c->has_capacity = 0;
-    }
-    if (r->chunks_failed > 0 || m == MODE_STANDARD)
-        return 0;
+    stage_skipped(r, "not run unless --estimate-capacity is requested after a mismatch");
 
-    if (m == MODE_ADAPTIVE) {
-        visual_break_line();
-        log_out("no counter-evidence from probe, retention and capacity search; "
-                "escalating to full write/read verify (use --mode standard to stop here)");
-    }
+    visual_break_line();
+    log_out("no counter-evidence from sparse probes; verifying the full range in one write pass");
 
     r = stage_new(c, "full-verify");
     if (stage_full(c, r) < 0)
         return -1;
+    if (r->chunks_failed > 0 && c->cfg->estimate_capacity && !fc_interrupted)
+        return run_boundary(c);
     return 0;
 }

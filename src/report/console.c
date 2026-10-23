@@ -257,7 +257,8 @@ void report_console(const run_ctx *c, verdict v)
     }
 
     for (size_t i = 0; i < c->nst; i++)
-        print_stage(&c->st[i], c->pl.chunk);
+        if (c->st[i].executed)
+            print_stage(&c->st[i], c->pl.chunk);
 
     log_out("");
     log_out("Summary:");

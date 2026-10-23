@@ -35,6 +35,8 @@ typedef struct {
     uint64_t bench_bytes;
     uint64_t boundary_budget;
     uint64_t boundary_resolution;
+    int estimate_capacity;
+    int benchmark_only;
     pattern_kind pattern;
     int self_test;
     uint64_t st_reported;

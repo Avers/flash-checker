@@ -252,29 +252,24 @@ But the test must be multi-pass.
 
 ---
 
-# 9. Sliding Window
+# 9. Full-Range Delayed Verification
 
-A good compromise between speed and reliability is the **sliding window**.
+The certification pass writes the whole selected range before starting read-back.
+Flush and checkpoint operations still use bounded windows:
 
 For example:
 
 ```text
 window = 1 GB
 
-WRITE:
-    region 0
-    region 1
-    ...
-    region N
+WRITE WINDOWS:
+    write and flush region 0..N
 
 READ:
-    region 0
-    region 1
-    ...
-    region N
+    verify region 0..N after the final write
 ```
 
-Then the window moves:
+The flush window moves:
 
 ```text
 [0 ........ 1 GB]
@@ -282,7 +277,8 @@ Then the window moves:
               [2 GB ........ 3 GB]
 ```
 
-This forces the FTL to simultaneously maintain many unique data sets.
+Delaying all reads until the final write makes an earlier region fail if a later
+logical address aliases it, even when the two addresses are far apart.
 
 ---
 
@@ -456,9 +452,11 @@ is selected experimentally.
 
 ---
 
-# 16. Verification During Writing
+# 16. Verification After Writing
 
-Writing and verification can be combined.
+Verification is delayed until the entire tested range has been written. The
+implementation keeps bounded flush windows for interruption recovery and I/O
+batching, without verifying each window before later addresses are written.
 
 For example:
 
@@ -468,7 +466,7 @@ write block 1
 write block 2
 ...
 
-after filling the window:
+after writing the complete range:
 
 read block 0
 read block 1
@@ -478,14 +476,15 @@ read block 1
 Result:
 
 ```text
-       WRITE WINDOW
+       WRITE RANGE
 <-------------------->
 
-              READ
-              <---->
+              READ RANGE
+              <-------->
 ```
 
-This reduces RAM consumption and allows detecting errors earlier.
+This keeps memory use bounded and detects aliases across distant addresses with
+one full-range write pass.
 
 ---
 
