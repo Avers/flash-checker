@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-10-23
+
 ### Security / Fixed
 - JSON reports now reject symlink destinations, publish atomically, and use
   private mode `0600`
@@ -21,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### CLI / Improved
 - Print the version at startup for every invocation
 - Use a rotating Braille spinner in UTF-8 locales, with an ASCII fallback
+- Keep speed benchmarking separate from normal capacity tests; `--bench` remains available
+- Add a conservative host-write upper bound to destructive dry-run plans
+
+### Testing / Improved
+- Adaptive/full certification now writes the tested range once, then verifies it after all writes finish
+- Make standard mode diagnostic-only and keep capacity-boundary estimates bounded and explicit
+- Honor nonzero offsets by skipping the prefix-based boundary search
 
 ## [0.3.5] - 2026-10-13
 

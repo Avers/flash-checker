@@ -18,6 +18,45 @@
 #endif
 
 #include "flashcheck/util.h"
+#include "flashcheck/pipeline.h"
+
+static uint64_t sat_add_u64(uint64_t a, uint64_t b)
+{
+    return a > UINT64_MAX - b ? UINT64_MAX : a + b;
+}
+
+static uint64_t sat_mul_u64(uint64_t a, uint64_t b)
+{
+    return a != 0 && b > UINT64_MAX / a ? UINT64_MAX : a * b;
+}
+
+static uint64_t estimate_host_writes(const config *c, const device_info *d)
+{
+    uint64_t end = c->limit != 0 ? FC_MIN(c->limit, d->capacity) : d->capacity;
+    uint64_t start = c->offset;
+    uint64_t chunk = c->chunk_size;
+    uint64_t range, probes[64], nprobe, estimate;
+
+    end = (end / chunk) * chunk;
+    if (c->mode == MODE_IDENTIFY || start >= end)
+        return 0;
+    range = end - start;
+    if (c->benchmark_only)
+        return FC_MIN(range, c->bench_bytes);
+    nprobe = pipeline_probes(start, end, chunk, 48, probes,
+                             sizeof probes / sizeof probes[0]);
+    estimate = sat_mul_u64(nprobe, chunk);
+
+    if (c->mode == MODE_QUICK || c->mode == MODE_IDENTIFY)
+        return estimate;
+
+    estimate = sat_add_u64(estimate, sat_mul_u64(range, c->passes));
+
+    if (start == 0 && chunk <= UINT64_MAX / 16 && end >= chunk * 16 &&
+        (c->mode == MODE_STANDARD || c->estimate_capacity))
+        estimate = sat_add_u64(estimate, c->boundary_budget);
+    return estimate;
+}
 
 static int suffix_matches(const char *s)
 {
@@ -566,18 +605,24 @@ int safety_lock_device(int fd)
 void safety_plan(const config *c, const device_info *d)
 {
     uint64_t end = c->limit != 0 ? FC_MIN(c->limit, d->capacity) : d->capacity;
-    char a[64], b[64];
+    uint64_t writes = estimate_host_writes(c, d);
+    char a[64], b[64], w[64];
 
     fmt_size(a, sizeof a, c->offset);
     fmt_size(b, sizeof b, end);
     log_out("Plan:");
-    log_out("  mode:           %s", mode_str(c->mode));
+    log_out("  mode:           %s", c->benchmark_only ? "benchmark" : mode_str(c->mode));
     log_out("  range:          %s .. %s (of %llu bytes)", a, b,
             (unsigned long long)d->capacity);
     log_out("  chunk size:     %s", (fmt_size(a, sizeof a, c->chunk_size), a));
     log_out("  window:         %s", (fmt_size(b, sizeof b, c->window_size), b));
     log_out("  pattern:        %s", pattern_kind_str(c->pattern));
     log_out("  passes:         %llu", (unsigned long long)c->passes);
+    fmt_size(w, sizeof w, writes);
+    log_out("  estimated writes (upper bound): %s%s", writes == UINT64_MAX ? ">= " : "", w);
+    if (!c->benchmark_only)
+        log_out("  speed benchmark: not included; use --bench to run it separately");
+    log_out("  estimate is host I/O; controller write amplification is not included");
 }
 
 int safety_check(const config *c, const device_info *d, int fd, char *err, size_t errn)

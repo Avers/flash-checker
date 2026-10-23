@@ -11,7 +11,7 @@ Detect USB flash devices that report more capacity than they really have.
 
 ## Features
 
-- **Multi-stage testing**: benchmark → sparse probe → retention → full verify
+- **Multi-stage testing**: sparse probe → full-range write → delayed read-back
 - **Capacity boundary estimation**: exponential growth + bisection to find reliable capacity
 - **Aliasing detection**: identifies when two LBA addresses return the same data
 - **Color-coded results**: PASS (green), FAIL (red), INCONCLUSIVE (yellow)
@@ -30,7 +30,7 @@ Silicon) are attached to every
 and no build tools needed:
 
 ```sh
-VERSION=0.3.8
+VERSION=0.3.9
 curl -LO "https://github.com/Avers/flash-checker/releases/download/v${VERSION}/flashcheck-${VERSION}-linux-x86_64.tar.gz"
 shasum -a 256 -c "flashcheck-${VERSION}-linux-x86_64.tar.gz.sha256"   # verify
 tar xzf "flashcheck-${VERSION}-linux-x86_64.tar.gz"
@@ -77,24 +77,31 @@ flashcheck --self-test=honest --self-reported=256MiB --self-real=128MiB
 | Mode | Description |
 |------|-------------|
 | `identify` | Print device info only, never writes |
-| `quick` | Benchmark + sparse probe only, never certifies capacity |
-| `standard` | Probe + retention + capacity search, stops there |
-| `adaptive` | Default. Standard stages, then full write/read verify only when no counter-evidence was found |
-| `full` | Same stages as adaptive, explicit |
+| `quick` | Sparse probe only, never certifies capacity |
+| `standard` | Sparse probe + retention + bounded capacity estimate; diagnostic only |
+| `adaptive` | Default. Sparse probe, then one full-range write sweep and full read-back |
+| `full` | Same certification as adaptive, explicit |
 
-On a device that passes every probe, the default `adaptive` mode writes the **entire
-reported capacity** — that full write/read round trip is what certifies it. Use
-`--mode quick`, `--mode standard` or `--limit SIZE` to bound a run.
+The default `adaptive` mode writes the selected range once, then verifies it after
+the entire range has been written. This catches aliases across distant addresses
+while avoiding a separate full retention sweep. It does not run a speed benchmark
+or capacity search automatically. Use `--mode quick` or `--limit SIZE` to reduce
+the tested range; those runs do not certify the full capacity.
 
 ## Tuning
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--block-size SIZE` | `8MiB` | Region size used for write/verify chunks |
-| `--window SIZE` | `1GiB` | Sliding write-then-verify window (`--mode full`) |
-| `--passes N` | `1` | Retention passes |
+| `--window SIZE` | `1GiB` | Flush/checkpoint window; full read-back starts after all writes |
+| `--passes N` | `1` | Full-range write/verify passes (`standard` repeats retention writes) |
 | `--pattern KIND` | `chacha20` | Data pattern: `chacha20`, `prng` or `zero` |
 | `--depth N` | `4` | Parallel data-generation depth (0-16); `0`/`1` generates inline, no helper thread |
+| `--estimate-capacity` | off | After a mismatch, also run the bounded boundary estimate; adds writes |
+
+`--bench` is a separate speed test and writes `--bench-bytes` (256 MiB by
+default). Run it only when you need speed measurements. Standard mode is also
+diagnostic: a capacity lower bound is not a full read-back certification.
 
 Run `flashcheck --help` for the full list of tuning flags.
 
@@ -109,7 +116,7 @@ RESULT: FAIL
 |---------|-------|---------|
 | `PASS` | Green | Device returned every byte written over the tested range |
 | `FAIL` | Red | Evidence of fake capacity (aliasing, stale data, unwritten regions) |
-| `INCONCLUSIVE` | Yellow | Cannot certify — I/O errors, throttling, or need `--mode full` |
+| `INCONCLUSIVE` | Yellow | The selected diagnostic or range did not verify the full device |
 
 ## Exit Codes
 
@@ -269,11 +276,10 @@ xattr ./build/flashcheck
 ## How It Works
 
 1. **Identify** — read device info (model, serial, capacity, block sizes)
-2. **Benchmark** — measure write/read speeds
-3. **Sparse probe** — write unique patterns at exponentially spaced offsets
-4. **Retention** — write far beyond suspected capacity, then re-verify old regions
-5. **Capacity search** — bisection to find the reliable capacity boundary
-6. **Full verify** — write and verify the entire reported capacity (if `--mode full`)
+2. **Sparse probe** — write unique patterns at exponentially spaced offsets
+3. **Full-range certification** — write every tested chunk, flush, then verify every chunk
+4. **Optional diagnosis** — standard mode runs retention and a bounded capacity estimate; `--estimate-capacity` adds an estimate after a mismatch
+5. **Optional benchmark** — `--bench` measures speed in a separate run
 
 Each chunk is self-identifying via `seed = SHA256(test_id ‖ pass ‖ chunk_index)`, enabling streaming verification without storing data.
 
@@ -282,12 +288,12 @@ Each chunk is self-identifying via `seed = SHA256(test_id ‖ pass ‖ chunk_ind
 The core concept of flash-checker is to detect USB flash devices that report more capacity than they really have. The key design principles are:
 
 - **Unique reproducible data**: Each write chunk uses a deterministic pattern seeded with `SHA256(test_id ‖ pass ‖ chunk_index)`, enabling streaming verification without storing all data in memory
-- **Multi-stage testing**: Exponential growth + bisection to find the reliable capacity boundary, with sparse probe, retention, and full verify stages
+- **Write-aware testing**: a sparse probe followed by one full-range write and delayed read-back for certification; bounded boundary diagnosis is opt-in outside standard mode
 - **Alias detection**: Identifies when two LBA addresses return the same data (controller mapping multiple logical addresses to the same physical storage)
 - **Stale data detection**: Detects controllers that discard old data when writing past real capacity
 - **Wear leveling resistance**: Tests must survive controller garbage wear leveling and garbage collection mechanisms
-- **Sliding window**: A compromise between speed and reliability, forcing the controller to simultaneously support many unique data regions
-- **Retention test**: The most important test — write unique data, then write new data far beyond, and verify old data still survives. This is the strongest way to detect fake capacity simulators.
+- **Delayed full verification**: Read-back starts only after all tested addresses have been written, so overwriting aliases at distant addresses is visible without a second full-device write sweep
+- **Retention diagnostic**: Standard mode keeps the explicit overwrite-and-anchor check for users who want a bounded capacity estimate
 
 Supported operating systems:
 

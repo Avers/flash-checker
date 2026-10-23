@@ -196,14 +196,26 @@ int main(int argc, char **argv)
     ctx.checkpoint_path = cfg.checkpoint_path;
     if (cfg.resume && cfg.checkpoint_path != NULL) {
         if (checkpoint_load(cfg.checkpoint_path, &cp) == 0 &&
-            strcmp(cp.stage, "full-verify") == 0 &&
+            strcmp(cp.stage, "full-write-verify") == 0 &&
+            cp.passes == cfg.passes && (cp.phase == 0 || cp.phase == 1) &&
+            cp.pass < cfg.passes &&
             checkpoint_matches(&cp, dev.device_id, device_fingerprint(&dev), dev.capacity,
                                cfg.offset, cfg.limit,
                                cfg.chunk_size, cfg.pattern, cfg.mode)) {
             ctx.test_id = cp.test_id != 0 ? cp.test_id : ctx.test_id;
             ctx.resume_off = cp.offset;
-            if (strcmp(cp.stage, "full-verify") == 0 && cp.complete)
-                ctx.resume_off = 0;
+            ctx.resume_pass = cp.pass;
+            ctx.resume_phase = cp.phase;
+            ctx.resume_bytes_written = cp.bytes_written;
+            ctx.resume_bytes_verified = cp.bytes_verified;
+            ctx.resume_valid = !cp.complete;
+            if (cp.complete) {
+                ctx.resume_off = cfg.offset;
+                ctx.resume_pass = 0;
+                ctx.resume_phase = 0;
+                ctx.resume_bytes_written = 0;
+                ctx.resume_bytes_verified = 0;
+            }
         } else {
             log_warn("checkpoint at %s is missing, invalid, or does not match this device and "
                      "test configuration; starting from the beginning", cfg.checkpoint_path);

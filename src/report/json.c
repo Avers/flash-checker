@@ -168,9 +168,17 @@ int report_json(const run_ctx *c, verdict v, const char *path)
         fprintf(f, "  \"reliable_capacity_bytes\": null,\n");
     }
     fprintf(f, "  \"stages\": [\n");
-    for (size_t i = 0; i < c->nst; i++) {
-        json_stage(f, &c->st[i]);
-        fprintf(f, "%s\n", i + 1 == c->nst ? "" : ",");
+    {
+        int first_stage = 1;
+        for (size_t i = 0; i < c->nst; i++) {
+            if (!c->st[i].executed)
+                continue;
+            if (!first_stage)
+                fprintf(f, ",\n");
+            first_stage = 0;
+            json_stage(f, &c->st[i]);
+            fprintf(f, "\n");
+        }
     }
     fprintf(f, "  ],\n");
     fprintf(f, "  \"verdict\": \"%s\",\n", verdict_str(v));

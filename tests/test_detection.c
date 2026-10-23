@@ -387,6 +387,8 @@ static void test_verdict(void)
     T_BEGIN("verified write passes");
     ctx.tested_bytes = 1u << 20;
     ctx.has_capacity = 1;
+    CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
+    cfg.mode = MODE_FULL;
     CHECK(run_verdict(&ctx) == VERDICT_PASS);
 
     T_BEGIN("mismatch fails");
@@ -538,34 +540,34 @@ static void test_mode_gating(void)
     CHECK(strcmp(ctx.st[2].name, "sparse-probe") == 0);
     CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
 
-    T_BEGIN("standard runs through the capacity search and passes an honest device");
+    T_BEGIN("standard runs through capacity diagnostics but does not certify");
     cfg.mode = MODE_STANDARD;
     CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_HONEST, reported, reported, chunk), 0);
     CHECK_EQ_U64(ctx.nst, 5);
     CHECK(strcmp(ctx.st[3].name, "retention") == 0);
     CHECK(strcmp(ctx.st[4].name, "capacity-boundary") == 0);
-    CHECK(ctx.has_capacity == 1);
-    CHECK(run_verdict(&ctx) == VERDICT_PASS);
+    CHECK(ctx.has_capacity == 0);
+    CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
 
     dev.capacity = 8u << 20;
     reported = 8u << 20;
     cfg.chunk_size = 64u << 10;
     chunk = 64u << 10;
 
-    T_BEGIN("standard certifies when the tested range covers the claim");
+    T_BEGIN("standard capacity estimate remains diagnostic on a full range");
     CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_HONEST, reported, reported, chunk), 0);
     CHECK_EQ_U64(ctx.nst, 5);
     CHECK(ctx.st[4].has_capacity == 1);
     CHECK_EQ_U64(ctx.st[4].chunks_failed, 0);
-    CHECK(ctx.has_capacity == 1);
-    CHECK(run_verdict(&ctx) == VERDICT_PASS);
+    CHECK(ctx.has_capacity == 0);
+    CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
 
     cfg.limit = reported;
 
-    T_BEGIN("a limit that reaches the full claim still certifies");
+    T_BEGIN("a full-range limit does not turn diagnostics into certification");
     CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_HONEST, reported, reported, chunk), 0);
-    CHECK(ctx.has_capacity == 1);
-    CHECK(run_verdict(&ctx) == VERDICT_PASS);
+    CHECK(ctx.has_capacity == 0);
+    CHECK(run_verdict(&ctx) == VERDICT_INCONCLUSIVE);
 
     cfg.limit = reported / 2;
 
@@ -587,7 +589,7 @@ static void test_mode_gating(void)
     dev.capacity = 16u << 20;
     reported = 16u << 20;
 
-    T_BEGIN("adaptive escalates to full verify on a clean device");
+    T_BEGIN("adaptive certifies with a full-range write then verify sweep");
     cfg.mode = MODE_ADAPTIVE;
     CHECK_EQ_U64(run_mode_case(&cfg, &dev, &ctx, FAKE_HONEST, reported, reported, chunk), 0);
     CHECK_EQ_U64(ctx.nst, 6);

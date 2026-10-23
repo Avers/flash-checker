@@ -53,6 +53,11 @@ typedef struct {
     uint64_t tested_bytes;
     uint64_t test_id;
     uint64_t resume_off;
+    uint64_t resume_pass;
+    uint64_t resume_bytes_written;
+    uint64_t resume_bytes_verified;
+    int resume_phase;
+    int resume_valid;
     const char *checkpoint_path;
 } run_ctx;
 

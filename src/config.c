@@ -60,6 +60,15 @@ int config_validate(config *c, char *err, size_t errn)
         snprintf(err, errn, "--passes must be >= 1");
         return -1;
     }
+    if (c->passes > UINT32_MAX) {
+        snprintf(err, errn, "--passes must be <= %llu",
+                 (unsigned long long)UINT32_MAX);
+        return -1;
+    }
+    if (c->chunk_size > UINT64_MAX / 16) {
+        snprintf(err, errn, "--block-size is too large");
+        return -1;
+    }
     if (c->chunk_size == 0 || c->offset % c->chunk_size != 0) {
         snprintf(err, errn, "--offset must be a multiple of --block-size (%llu)",
                  (unsigned long long)c->chunk_size);
