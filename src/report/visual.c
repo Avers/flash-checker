@@ -12,6 +12,16 @@ static uint64_t g_last_draw = 0;
 static int g_stage_idx = 0;
 static int g_stage_total = 0;
 static int g_line_open = 0;
+static unsigned g_spinner_idx = 0;
+
+static char spinner_next(void)
+{
+    static const char frames[] = "|/-\\";
+    char frame = frames[g_spinner_idx % (sizeof frames - 1)];
+
+    g_spinner_idx++;
+    return frame;
+}
 
 void visual_set_enabled(int on) { g_visual = on ? 1 : 0; }
 int visual_is_enabled(void) { return g_visual; }
@@ -20,6 +30,7 @@ void visual_run_begin(int total_stages)
 {
     g_stage_total = total_stages;
     g_stage_idx = 0;
+    g_spinner_idx = 0;
 }
 
 int visual_stage_index(void) { return g_stage_idx; }
@@ -163,6 +174,7 @@ const uint8_t *visual_map_cells(void) { return g_map; }
 void visual_update(const char *label, uint64_t done, uint64_t total, double bps)
 {
     char bar[256], a[64], b[64], r[64], tag[32], eta_buf[128] = "";
+    char spinner;
     uint64_t now = now_ms();
     int pct = 0;
     int tty;
@@ -181,6 +193,7 @@ void visual_update(const char *label, uint64_t done, uint64_t total, double bps)
     fmt_size(b, sizeof b, total);
     fmt_rate(r, sizeof r, bps);
     stage_tag(tag, sizeof tag);
+    spinner = spinner_next();
 
     if (bps > 0 && total > done) {
         double rem = (double)(total - done) / bps;
@@ -191,12 +204,12 @@ void visual_update(const char *label, uint64_t done, uint64_t total, double bps)
 
     tty = isatty(STDOUT_FILENO);
     if (tty) {
-        fprintf(stdout, "\r  %s%s %s %3d%% %s/%s %s%s\x1b[K", tag, label, bar, pct, a, b, r,
-                eta_buf);
+        fprintf(stdout, "\r  %c %s%s %s %3d%% %s/%s %s%s\x1b[K", spinner, tag, label, bar, pct, a,
+                b, r, eta_buf);
         g_line_open = 1;
     } else {
-        fprintf(stdout, "  %s%s %s %3d%% %s/%s %s%s\n", tag, label, bar, pct, a, b, r,
-                eta_buf);
+        fprintf(stdout, "  %c %s%s %s %3d%% %s/%s %s%s\n", spinner, tag, label, bar, pct, a, b,
+                r, eta_buf);
         g_line_open = 0;
     }
     fflush(stdout);
@@ -205,6 +218,7 @@ void visual_update(const char *label, uint64_t done, uint64_t total, double bps)
 void visual_update_count(const char *label, uint64_t done, uint64_t total)
 {
     char bar[256], tag[32];
+    char spinner;
     uint64_t now = now_ms();
     int pct = 0;
     int tty;
@@ -219,14 +233,15 @@ void visual_update_count(const char *label, uint64_t done, uint64_t total)
         pct = (int)((done * 100ULL) / total);
     visual_bar(bar, sizeof bar, done, total, VISUAL_BAR_WIDTH);
     stage_tag(tag, sizeof tag);
+    spinner = spinner_next();
 
     tty = isatty(STDOUT_FILENO);
     if (tty) {
-        fprintf(stdout, "\r  %s%s %s %3d%% %llu/%llu\x1b[K", tag, label, bar, pct,
+        fprintf(stdout, "\r  %c %s%s %s %3d%% %llu/%llu\x1b[K", spinner, tag, label, bar, pct,
                 (unsigned long long)done, (unsigned long long)total);
         g_line_open = 1;
     } else {
-        fprintf(stdout, "  %s%s %s %3d%% %llu/%llu\n", tag, label, bar, pct,
+        fprintf(stdout, "  %c %s%s %s %3d%% %llu/%llu\n", spinner, tag, label, bar, pct,
                 (unsigned long long)done, (unsigned long long)total);
         g_line_open = 0;
     }

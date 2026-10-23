@@ -2,6 +2,59 @@
 
 #include "flashcheck/visual.h"
 
+#include <unistd.h>
+
+static void test_progress_spinner(void)
+{
+    FILE *capture = tmpfile();
+    char first[256], second[256];
+    int saved_stdout;
+
+    T_BEGIN("progress shows a rotating ASCII spinner before the stage counter");
+    CHECK(capture != NULL);
+    if (capture == NULL)
+        return;
+
+    saved_stdout = dup(STDOUT_FILENO);
+    CHECK(saved_stdout >= 0);
+    if (saved_stdout < 0) {
+        fclose(capture);
+        return;
+    }
+    fflush(stdout);
+    if (dup2(fileno(capture), STDOUT_FILENO) != STDOUT_FILENO) {
+        CHECK(0);
+        close(saved_stdout);
+        fclose(capture);
+        return;
+    }
+
+    visual_set_enabled(1);
+    visual_run_begin(2);
+    visual_stage_begin("write", 0, 100);
+    visual_update("write", 0, 100, 0.0);
+    visual_stage_step();
+    visual_update("read", 0, 100, 0.0);
+    fflush(stdout);
+
+    CHECK(dup2(saved_stdout, STDOUT_FILENO) == STDOUT_FILENO);
+    close(saved_stdout);
+    visual_set_enabled(0);
+
+    rewind(capture);
+    if (fgets(first, sizeof first, capture) == NULL) {
+        CHECK(0);
+    } else {
+        CHECK(strncmp(first, "  | [1/2] write", strlen("  | [1/2] write")) == 0);
+    }
+    if (fgets(second, sizeof second, capture) == NULL) {
+        CHECK(0);
+    } else {
+        CHECK(strncmp(second, "  / [2/2] read", strlen("  / [2/2] read")) == 0);
+    }
+    fclose(capture);
+}
+
 void test_visual(void)
 {
     char buf[256];
@@ -23,6 +76,8 @@ void test_visual(void)
     T_BEGIN("visual bar zero total");
     visual_bar(buf, sizeof buf, 0, 0, 4);
     CHECK(strstr(buf, "[") == buf);
+
+    test_progress_spinner();
 
     T_BEGIN("visual map index");
     CHECK(visual_map_index(0, 0, 640) == 0);

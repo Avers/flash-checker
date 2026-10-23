@@ -59,6 +59,8 @@ int main(int argc, char **argv)
     memset(&cp, 0, sizeof cp);
     config_defaults(&cfg);
     rc = cli_parse(argc, argv, &cfg, &action, err, sizeof err);
+    if (!(rc == CLI_EXIT && action == CLI_ACTION_VERSION))
+        log_out("%s %s", FC_PROG, FC_VERSION);
     if (rc == CLI_EXIT) {
         if (action == CLI_ACTION_HELP) {
             cli_usage(stdout, FC_PROG);
