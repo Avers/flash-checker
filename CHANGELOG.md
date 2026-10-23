@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Binary installation example now uses the current repository slug, version,
   and release asset naming
 
+### CLI / Improved
+- Print the version at startup for every invocation
+- Add a rotating ASCII spinner to live progress output
+
 ## [0.3.5] - 2026-10-13
 
 ### Security / Fixed
