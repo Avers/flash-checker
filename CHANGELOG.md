@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-10-23
+
+### CLI / Improved
+- Use a rotating Braille spinner in UTF-8 locales, with an ASCII fallback
+
 ## [0.3.7] - 2026-10-23
 
 ### CLI / Improved

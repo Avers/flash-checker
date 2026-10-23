@@ -2,15 +2,29 @@
 
 #include "flashcheck/visual.h"
 
+#include <langinfo.h>
+#include <locale.h>
+#include <strings.h>
 #include <unistd.h>
+
+static int test_locale_is_utf8(void)
+{
+    const char *codeset;
+
+    (void)setlocale(LC_CTYPE, "");
+    codeset = nl_langinfo(CODESET);
+    return strcasecmp(codeset, "UTF-8") == 0 || strcasecmp(codeset, "UTF8") == 0;
+}
 
 static void test_progress_spinner(void)
 {
     FILE *capture = tmpfile();
     char first[256], second[256];
+    const char *first_frame = test_locale_is_utf8() ? "⠋" : "|";
+    const char *second_frame = test_locale_is_utf8() ? "⠙" : "/";
     int saved_stdout;
 
-    T_BEGIN("progress shows a rotating ASCII spinner before the stage counter");
+    T_BEGIN("progress shows a rotating spinner before the stage counter");
     CHECK(capture != NULL);
     if (capture == NULL)
         return;
@@ -45,12 +59,16 @@ static void test_progress_spinner(void)
     if (fgets(first, sizeof first, capture) == NULL) {
         CHECK(0);
     } else {
-        CHECK(strncmp(first, "  | [1/2] write", strlen("  | [1/2] write")) == 0);
+        char expected[64];
+        snprintf(expected, sizeof expected, "  %s [1/2] write", first_frame);
+        CHECK(strncmp(first, expected, strlen(expected)) == 0);
     }
     if (fgets(second, sizeof second, capture) == NULL) {
         CHECK(0);
     } else {
-        CHECK(strncmp(second, "  / [2/2] read", strlen("  / [2/2] read")) == 0);
+        char expected[64];
+        snprintf(expected, sizeof expected, "  %s [2/2] read", second_frame);
+        CHECK(strncmp(second, expected, strlen(expected)) == 0);
     }
     fclose(capture);
 }
