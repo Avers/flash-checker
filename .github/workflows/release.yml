@@ -86,18 +86,21 @@ jobs:
 
       - name: Release notes
         run: |
-          TAG="v$(cat VERSION)"
+          VERSION="$(cat VERSION)"
           {
             echo "Pre-built binaries — no sources, no build tools."
             echo
             echo "Verify a download with: \`shasum -a 256 -c <tarball>.sha256\`"
             echo
-            awk -v tag="$TAG" '
-              $0 == "## [" tag "]" { found=1; next }
+            awk -v ver="$VERSION" '
+              index($0, "## [" ver "]") == 1 { found=1; next }
               found && /^## \[/ { exit }
               found { print }
             ' CHANGELOG.md
           } > release-notes.md
+          if ! grep -q "## \[$VERSION\]" CHANGELOG.md; then
+            echo "::warning::CHANGELOG.md has no section for $VERSION; release notes omit the change list"
+          fi
 
       - name: Create release
         env:
