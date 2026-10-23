@@ -30,7 +30,7 @@ Silicon) are attached to every
 and no build tools needed:
 
 ```sh
-VERSION=0.3.7
+VERSION=0.3.8
 curl -LO "https://github.com/Avers/flash-checker/releases/download/v${VERSION}/flashcheck-${VERSION}-linux-x86_64.tar.gz"
 shasum -a 256 -c "flashcheck-${VERSION}-linux-x86_64.tar.gz.sha256"   # verify
 tar xzf "flashcheck-${VERSION}-linux-x86_64.tar.gz"

@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### CLI / Improved
 - Print the version at startup for every invocation
-- Add a rotating ASCII spinner to live progress output
+- Use a rotating Braille spinner in UTF-8 locales, with an ASCII fallback
 
 ## [0.3.5] - 2026-10-13
 

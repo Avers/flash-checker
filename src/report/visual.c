@@ -2,6 +2,9 @@
 
 #include "flashcheck/util.h"
 
+#include <langinfo.h>
+#include <locale.h>
+#include <strings.h>
 #include <unistd.h>
 
 static int g_visual = 0;
@@ -13,11 +16,31 @@ static int g_stage_idx = 0;
 static int g_stage_total = 0;
 static int g_line_open = 0;
 static unsigned g_spinner_idx = 0;
+static int g_spinner_utf8 = -1;
 
-static char spinner_next(void)
+static int spinner_utf8_enabled(void)
 {
-    static const char frames[] = "|/-\\";
-    char frame = frames[g_spinner_idx % (sizeof frames - 1)];
+    if (g_spinner_utf8 < 0) {
+        const char *codeset;
+
+        (void)setlocale(LC_CTYPE, "");
+        codeset = nl_langinfo(CODESET);
+        g_spinner_utf8 = strcasecmp(codeset, "UTF-8") == 0 || strcasecmp(codeset, "UTF8") == 0;
+    }
+    return g_spinner_utf8;
+}
+
+static const char *spinner_next(void)
+{
+    static const char *const frames[] = {"⠋", "⠙", "⠹", "⠸", "⠼",
+                                         "⠴", "⠦", "⠧", "⠇", "⠏"};
+    static const char *const ascii_frames[] = {"|", "/", "-", "\\"};
+    const char *frame;
+
+    if (spinner_utf8_enabled())
+        frame = frames[g_spinner_idx % (sizeof frames / sizeof frames[0])];
+    else
+        frame = ascii_frames[g_spinner_idx % (sizeof ascii_frames / sizeof ascii_frames[0])];
 
     g_spinner_idx++;
     return frame;
@@ -174,7 +197,7 @@ const uint8_t *visual_map_cells(void) { return g_map; }
 void visual_update(const char *label, uint64_t done, uint64_t total, double bps)
 {
     char bar[256], a[64], b[64], r[64], tag[32], eta_buf[128] = "";
-    char spinner;
+    const char *spinner;
     uint64_t now = now_ms();
     int pct = 0;
     int tty;
@@ -204,11 +227,11 @@ void visual_update(const char *label, uint64_t done, uint64_t total, double bps)
 
     tty = isatty(STDOUT_FILENO);
     if (tty) {
-        fprintf(stdout, "\r  %c %s%s %s %3d%% %s/%s %s%s\x1b[K", spinner, tag, label, bar, pct, a,
+        fprintf(stdout, "\r  %s %s%s %s %3d%% %s/%s %s%s\x1b[K", spinner, tag, label, bar, pct, a,
                 b, r, eta_buf);
         g_line_open = 1;
     } else {
-        fprintf(stdout, "  %c %s%s %s %3d%% %s/%s %s%s\n", spinner, tag, label, bar, pct, a, b,
+        fprintf(stdout, "  %s %s%s %s %3d%% %s/%s %s%s\n", spinner, tag, label, bar, pct, a, b,
                 r, eta_buf);
         g_line_open = 0;
     }
@@ -218,7 +241,7 @@ void visual_update(const char *label, uint64_t done, uint64_t total, double bps)
 void visual_update_count(const char *label, uint64_t done, uint64_t total)
 {
     char bar[256], tag[32];
-    char spinner;
+    const char *spinner;
     uint64_t now = now_ms();
     int pct = 0;
     int tty;
@@ -237,11 +260,11 @@ void visual_update_count(const char *label, uint64_t done, uint64_t total)
 
     tty = isatty(STDOUT_FILENO);
     if (tty) {
-        fprintf(stdout, "\r  %c %s%s %s %3d%% %llu/%llu\x1b[K", spinner, tag, label, bar, pct,
+        fprintf(stdout, "\r  %s %s%s %s %3d%% %llu/%llu\x1b[K", spinner, tag, label, bar, pct,
                 (unsigned long long)done, (unsigned long long)total);
         g_line_open = 1;
     } else {
-        fprintf(stdout, "  %c %s%s %s %3d%% %llu/%llu\n", spinner, tag, label, bar, pct,
+        fprintf(stdout, "  %s %s%s %s %3d%% %llu/%llu\n", spinner, tag, label, bar, pct,
                 (unsigned long long)done, (unsigned long long)total);
         g_line_open = 0;
     }
