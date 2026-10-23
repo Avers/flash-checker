@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-10-23
+
+### CLI / Improved
+- Print the version at startup for every invocation
+- Add a rotating ASCII spinner to live progress output
+
+## [0.3.6] - 2026-10-18
+
 ### Security / Fixed
 - JSON reports now reject symlink destinations, publish atomically, and use
   private mode `0600`
@@ -17,10 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation / Updated
 - Binary installation example now uses the current repository slug, version,
   and release asset naming
-
-### CLI / Improved
-- Print the version at startup for every invocation
-- Add a rotating ASCII spinner to live progress output
 
 ## [0.3.5] - 2026-10-13
 
